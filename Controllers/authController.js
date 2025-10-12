@@ -93,6 +93,7 @@ async function login(req, res, next) {
         name: user.name,
         facultyID: user.facultyID,
         apiKey: user.apiKey,
+        role: user.role,
         token,
       },
     });
