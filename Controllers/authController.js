@@ -11,7 +11,7 @@ const { generateFacultyID, generateApiKey } = require('../utils/generateID');
  */
 async function register(req, res, next) {
   try {
-    const { name, email, password, college, role } = req.body;
+    const { name, email, password, college, department, role } = req.body;
     if (!name || !email || !password || !college) {
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
