@@ -15,7 +15,7 @@ const { adminIssueNegativeCredit } = require('../Controllers/creditController');
  * POST /api/v1/admin/negative-credit -> give negative credit (with proof)
  */
 router.post('/credit-title', authMiddleware, adminOnly, createCreditTitle);
-router.get('/credit-title', authMiddleware, adminOnly, listCreditTitles);
+router.get('/credit-title', authMiddleware, listCreditTitles);
 
 // negative credit route
 router.post('/negative-credit', authMiddleware, adminOnly, upload.single('proof'), adminIssueNegativeCredit);
