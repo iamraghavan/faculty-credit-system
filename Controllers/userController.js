@@ -36,6 +36,7 @@ async function adminCreateUser(req, res, next) {
       email,
       password: hashed,
       college,
+      department,
       facultyID,
       apiKey,
       role: role === 'admin' ? 'admin' : 'faculty',

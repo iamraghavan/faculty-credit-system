@@ -47,6 +47,7 @@ async function register(req, res, next) {
       college,
       facultyID,
       apiKey,
+      department,
       role: assignedRole,
     });
 
@@ -60,6 +61,7 @@ async function register(req, res, next) {
         facultyID: user.facultyID,
         apiKey: user.apiKey,
         role: user.role,
+        department: user.department,
         token,
       },
     });
@@ -94,6 +96,7 @@ async function login(req, res, next) {
         facultyID: user.facultyID,
         apiKey: user.apiKey,
         role: user.role,
+        department: user.department,
         token,
       },
     });
