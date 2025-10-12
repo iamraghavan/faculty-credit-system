@@ -1,0 +1,252 @@
+{
+  "info": {
+    "name": "Faculty Credit System API - v1",
+    "_postman_id": "f9b8c3d2-8c1a-4b7a-9a6f-5d3f9a1e2b4c",
+    "description": "Postman collection for the Faculty Credit System (Express + MongoDB). Replace {{baseUrl}} with your server base URL and set environment variables as needed.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000" },
+    { "key": "token", "value": "" },
+    { "key": "adminToken", "value": "" },
+    { "key": "apiKey", "value": "" },
+    { "key": "facultyId", "value": "" },
+    { "key": "creditId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth - Register",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Dr. Alice\",\n  \"email\": \"alice@example.com\",\n  \"password\": \"Password123!\",\n  \"college\": \"Engineering College\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/auth/register",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "auth", "register"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Auth - Login",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"alice@example.com\",\n  \"password\": \"Password123!\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/auth/login",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "auth", "login"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Auth - Refresh Token",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/auth/refresh",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "auth", "refresh"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Users - Get Profile (me)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/users/me",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "users", "me"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Users - Admin Create User",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Prof. Bob\",\n  \"email\": \"bob@example.com\",\n  \"password\": \"AdminPass123#\",\n  \"college\": \"Arts and Science College\",\n  \"role\": \"faculty\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/users",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "users"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Users - Admin List Users",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/users?page=1&limit=20",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "users"],
+          "query": [
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "20" }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Credits - Submit Positive Credit (faculty) [file upload]",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "title",
+              "value": "Published Research - Q1 Journal",
+              "type": "text"
+            },
+            { "key": "points", "value": "5", "type": "text" },
+            { "key": "academicYear", "value": "2024-2025", "type": "text" },
+            { "key": "proof", "type": "file", "src": [""] }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/credits/positive",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "credits", "positive"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Credits - Admin Issue Negative Credit (with proof)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "facultyId", "value": "{{facultyId}}", "type": "text" },
+            {
+              "key": "title",
+              "value": "Misconduct - Late Submission",
+              "type": "text"
+            },
+            { "key": "points", "value": "2", "type": "text" },
+            { "key": "academicYear", "value": "2024-2025", "type": "text" },
+            {
+              "key": "notes",
+              "value": "Late submission of mandatory report",
+              "type": "text"
+            },
+            { "key": "proof", "type": "file", "src": [""] }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/admin/negative-credit",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "admin", "negative-credit"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Credits - Appeal Negative Credit",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"creditId\": \"{{creditId}}\",\n  \"reason\": \"I have valid evidence attached; request review\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/credits/{{creditId}}/appeal",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "credits", "{{creditId}}", "appeal"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Credits - List Credits for Faculty (paginated)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/credits/faculty/{{facultyId}}?page=1&limit=20",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "credits", "faculty", "{{facultyId}}"],
+          "query": [
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "20" }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Admin - Create Credit Title",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Conference Presentation\",\n  \"points\": 3,\n  \"description\": \"Presentation at a recognized conference\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/admin/credit-title",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "admin", "credit-title"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Admin - List Credit Titles",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/admin/credit-title",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "admin", "credit-title"]
+        }
+      },
+      "response": []
+    }
+  ]
+}

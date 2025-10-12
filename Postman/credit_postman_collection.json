@@ -1,0 +1,134 @@
+{
+  "info": {
+    "name": "Credit Management API",
+    "_postman_id": "d3c1a9f0-1234-5678-abcd-9876543210ab",
+    "description": "API collection for testing Credit Controller endpoints",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Create Credit Title (Admin)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ADMIN_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Excellent Research Paper\",\n  \"points\": 10,\n  \"type\": \"positive\",\n  \"description\": \"Awarded for publishing high-quality research paper\"\n}"
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/credit-title",
+          "host": ["{{BASE_URL}}"],
+          "path": ["credit-title"]
+        }
+      }
+    },
+    {
+      "name": "List Active Credit Titles",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
+        "url": {
+          "raw": "{{BASE_URL}}/credit-titles",
+          "host": ["{{BASE_URL}}"],
+          "path": ["credit-titles"]
+        }
+      }
+    },
+    {
+      "name": "Submit Positive Credit (Faculty)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{FACULTY_TOKEN}}" }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "creditTitleId",
+              "value": "{{CREDIT_TITLE_ID}}",
+              "type": "text"
+            },
+            { "key": "academicYear", "value": "2024-2025", "type": "text" },
+            { "key": "proof", "type": "file", "src": "/path/to/proof.pdf" }
+          ]
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/credits/positive",
+          "host": ["{{BASE_URL}}"],
+          "path": ["credits", "positive"]
+        }
+      }
+    },
+    {
+      "name": "Issue Negative Credit (Admin)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ADMIN_TOKEN}}" }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "facultyId", "value": "{{FACULTY_ID}}", "type": "text" },
+            {
+              "key": "creditTitleId",
+              "value": "{{NEGATIVE_CREDIT_TITLE_ID}}",
+              "type": "text"
+            },
+            { "key": "academicYear", "value": "2024-2025", "type": "text" },
+            {
+              "key": "notes",
+              "value": "Late submission of report",
+              "type": "text"
+            },
+            { "key": "proof", "type": "file", "src": "/path/to/proof.pdf" }
+          ]
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/credits/negative",
+          "host": ["{{BASE_URL}}"],
+          "path": ["credits", "negative"]
+        }
+      }
+    },
+    {
+      "name": "Appeal Negative Credit (Faculty)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{FACULTY_TOKEN}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"creditId\": \"{{CREDIT_ID}}\",\n  \"reason\": \"I submitted the report on time.\"\n}"
+        },
+        "url": {
+          "raw": "{{BASE_URL}}/credits/appeal",
+          "host": ["{{BASE_URL}}"],
+          "path": ["credits", "appeal"]
+        }
+      }
+    },
+    {
+      "name": "List Credits for Faculty",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{TOKEN}}" }],
+        "url": {
+          "raw": "{{BASE_URL}}/credits/faculty/{{FACULTY_ID}}?page=1&limit=20&academicYear=2024-2025",
+          "host": ["{{BASE_URL}}"],
+          "path": ["credits", "faculty", "{{FACULTY_ID}}"],
+          "query": [
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "20" },
+            { "key": "academicYear", "value": "2024-2025" }
+          ]
+        }
+      }
+    }
+  ]
+}
