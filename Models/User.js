@@ -23,7 +23,14 @@ const userSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+
 // Add indexes for faster queries if needed
 userSchema.index({ facultyID: 1 });
+userSchema.index({ department: 1 });
+userSchema.index({ college: 1 });
+userSchema.index({ role: 1 });
+userSchema.index({ isActive: 1 });
+
+
 
 module.exports = mongoose.model('User', userSchema);
