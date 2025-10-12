@@ -13,7 +13,6 @@ const userSchema = new mongoose.Schema(
     apiKey: { type: String, unique: true, required: true },
     currentCredit: { type: Number, default: 0 },
     creditsByYear: {
-      // store credits per academic year e.g. { "2024-2025": 10, "2023-2024": 5 }
       type: Map,
       of: Number,
       default: {}

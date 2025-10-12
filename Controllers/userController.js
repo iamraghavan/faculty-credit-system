@@ -20,7 +20,7 @@ async function getProfile(req, res, next) {
  */
 async function adminCreateUser(req, res, next) {
   try {
-    const { name, email, password, college, role } = req.body;
+    const { name, email, password, college, department, role } = req.body;
     if (!name || !email || !college || !password) return res.status(400).json({ success: false, message: 'Missing fields' });
 
     const exists = await User.findOne({ email });
