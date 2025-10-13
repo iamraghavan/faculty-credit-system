@@ -46,8 +46,6 @@ async function listCreditTitles(req, res, next) {
   }
 }
 
-// dep
-
 async function submitPositiveCredit(req, res, next) {
   try {
     const faculty = req.user;
@@ -66,30 +64,22 @@ async function submitPositiveCredit(req, res, next) {
       return res.status(400).json({ success: false, message: 'Points must be a positive number' });
     }
 
-    let creditTitleDoc = null;
-
-    // Normalize categories: accept array or CSV string or CreditTitle IDs
+    // Parse categories into an array of ObjectIds
+    let categoryIds = [];
     if (categories) {
-      // convert CSV string to array if needed
-      if (typeof categories === 'string') {
-        categories = categories.includes(',') ? categories.split(',').map(s => s.trim()) : [categories];
+      if (!Array.isArray(categories)) {
+        categories = String(categories).split(','); // accept CSV too
       }
-
-      const ids = categories.map(c => c.trim()).filter(Boolean);
-
-      if (ids.length) {
-        const creditTitles = await CreditTitle.find({ _id: { $in: ids } });
-        if (!creditTitles.length) {
-          return res.status(400).json({ success: false, message: 'Invalid CreditTitle ID(s) for categories' });
-        }
-        creditTitleDoc = creditTitles[0]; // pick first for reference (optional)
-        // Merge all categories
-        categories = [...new Set(creditTitles.reduce((acc, ct) => acc.concat(ct.categories || []), []))];
-      } else {
-        categories = [];
+      categoryIds = categories.map(c => c.trim()).filter(Boolean);
+      // validate IDs exist in CreditTitle
+      const validCategories = await CreditTitle.find({ _id: { $in: categoryIds } }).select('_id');
+      const validIds = validCategories.map(c => c._id.toString());
+      const invalidIds = categoryIds.filter(c => !validIds.includes(c));
+      if (invalidIds.length > 0) {
+        return res.status(400).json({ success: false, message: 'Invalid CreditTitle ID(s) for categories', invalidIds });
       }
-    } else {
-      categories = [];
+      // store as ObjectId array
+      categoryIds = validCategories.map(c => c._id);
     }
 
     // Handle proof file
@@ -97,7 +87,6 @@ async function submitPositiveCredit(req, res, next) {
     if (req.file) {
       const tmpPath = req.file.path;
       const destPath = `assets/${academicYear}/${Date.now()}_${req.file.originalname}`;
-
       if (process.env.GITHUB_TOKEN && process.env.ASSET_GH_REPO && process.env.ASSET_GH_OWNER) {
         try {
           proofUrl = await uploadFileToGitHub(tmpPath, destPath);
@@ -108,14 +97,12 @@ async function submitPositiveCredit(req, res, next) {
       } else {
         proofUrl = `/uploads/${path.basename(tmpPath)}`;
       }
-
       proofMeta = {
         originalName: req.file.originalname,
         size: req.file.size,
         mimeType: req.file.mimetype,
       };
-
-      try { fs.unlinkSync(tmpPath); } catch (e) { }
+      try { fs.unlinkSync(tmpPath); } catch (e) {}
     }
 
     // Create the Credit
@@ -128,10 +115,9 @@ async function submitPositiveCredit(req, res, next) {
         department: faculty.department,
       },
       type: 'positive',
-      creditTitle: creditTitleDoc ? creditTitleDoc._id : undefined,
       title,
       points,
-      categories,
+      categories: categoryIds, // store array of CreditTitle _id
       proofUrl,
       proofMeta,
       academicYear,
@@ -150,7 +136,6 @@ async function submitPositiveCredit(req, res, next) {
       const prev = Number(faculty.creditsByYear[academicYear] || 0);
       faculty.creditsByYear[academicYear] = prev + points;
     }
-
     await faculty.save();
 
     res.status(201).json({ success: true, data: creditDoc });
