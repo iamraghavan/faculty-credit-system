@@ -66,16 +66,25 @@ async function submitPositiveCredit(req, res, next) {
 
     let creditTitleDoc = null;
 
-    // If categories is a creditTitle ID, fetch categories from it
+    // Normalize categories: accept array or CSV string or CreditTitle IDs
     if (categories) {
-      try {
-        creditTitleDoc = await CreditTitle.findById(categories);
-        if (!creditTitleDoc || !Array.isArray(creditTitleDoc.categories)) {
-          return res.status(400).json({ success: false, message: 'Invalid CreditTitle ID for categories' });
+      // convert CSV string to array if needed
+      if (typeof categories === 'string') {
+        categories = categories.includes(',') ? categories.split(',').map(s => s.trim()) : [categories];
+      }
+
+      const ids = categories.map(c => c.trim()).filter(Boolean);
+
+      if (ids.length) {
+        const creditTitles = await CreditTitle.find({ _id: { $in: ids } });
+        if (!creditTitles.length) {
+          return res.status(400).json({ success: false, message: 'Invalid CreditTitle ID(s) for categories' });
         }
-        categories = creditTitleDoc.categories.map(c => String(c).trim()).filter(Boolean);
-      } catch (err) {
-        return res.status(400).json({ success: false, message: 'Invalid categories ID' });
+        creditTitleDoc = creditTitles[0]; // pick first for reference (optional)
+        // Merge all categories
+        categories = [...new Set(creditTitles.reduce((acc, ct) => acc.concat(ct.categories || []), []))];
+      } else {
+        categories = [];
       }
     } else {
       categories = [];
@@ -150,6 +159,7 @@ async function submitPositiveCredit(req, res, next) {
     next(err);
   }
 }
+
 
 /**
  * Admin issues negative credit to a faculty (with email notification)
