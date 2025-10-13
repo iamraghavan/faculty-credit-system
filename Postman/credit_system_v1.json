@@ -1,0 +1,104 @@
+{
+  "info": {
+    "name": "Credits API Tests",
+    "description": "Tests for POST /api/v1/credits/positive (creditTitleId flow + inline title/points flow)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "credits-api-tests-001"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000" },
+    { "key": "token", "value": "" },
+    { "key": "creditTitleId", "value": "" },
+    { "key": "academicYear", "value": "2025-2026" }
+  ],
+  "item": [
+    {
+      "name": "Submit Positive (using creditTitleId)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "creditTitleId",
+              "value": "{{creditTitleId}}",
+              "type": "text"
+            },
+            {
+              "key": "academicYear",
+              "value": "{{academicYear}}",
+              "type": "text"
+            },
+            {
+              "key": "proof",
+              "type": "file",
+              "src": ""
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/credits/positive",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "credits", "positive"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Submit Positive (inline title + points)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "title",
+              "value": "Published Research - Q1 Journal",
+              "type": "text"
+            },
+            {
+              "key": "points",
+              "value": "10",
+              "type": "text"
+            },
+            {
+              "key": "categories",
+              "value": "research,publication",
+              "type": "text"
+            },
+            {
+              "key": "academicYear",
+              "value": "{{academicYear}}",
+              "type": "text"
+            },
+            {
+              "key": "proof",
+              "type": "file",
+              "src": ""
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/credits/positive",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "credits", "positive"]
+        }
+      },
+      "response": []
+    }
+  ]
+}

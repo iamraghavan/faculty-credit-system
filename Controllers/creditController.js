@@ -46,26 +46,43 @@ async function listCreditTitles(req, res, next) {
   }
 }
 
-/**
- * Faculty submits positive credit using a credit title
- */
 async function submitPositiveCredit(req, res, next) {
   try {
     const faculty = req.user;
-    if (!faculty || faculty.role !== 'faculty') 
+    if (!faculty || faculty.role !== 'faculty') {
       return res.status(403).json({ success: false, message: 'Forbidden' });
+    }
 
-    const { creditTitleId, academicYear } = req.body;
-    if (!creditTitleId || !academicYear)
-      return res.status(400).json({ success: false, message: 'Missing fields' });
+    let { title, points, categories, academicYear, notes } = req.body;
 
-    const ct = await CreditTitle.findById(creditTitleId);
-    if (!ct || ct.type !== 'positive')
-      return res.status(400).json({ success: false, message: 'Invalid positive credit title' });
+    if (!title || !points || !academicYear) {
+      return res.status(400).json({ success: false, message: 'Missing required fields: title, points, or academicYear' });
+    }
+
+    points = Number(points);
+    if (Number.isNaN(points) || points <= 0) {
+      return res.status(400).json({ success: false, message: 'Points must be a positive number' });
+    }
+
+    let creditTitleDoc = null;
+
+    // If categories is a creditTitle ID, fetch categories from it
+    if (categories) {
+      try {
+        creditTitleDoc = await CreditTitle.findById(categories);
+        if (!creditTitleDoc || !Array.isArray(creditTitleDoc.categories)) {
+          return res.status(400).json({ success: false, message: 'Invalid CreditTitle ID for categories' });
+        }
+        categories = creditTitleDoc.categories.map(c => String(c).trim()).filter(Boolean);
+      } catch (err) {
+        return res.status(400).json({ success: false, message: 'Invalid categories ID' });
+      }
+    } else {
+      categories = [];
+    }
 
     // Handle proof file
-    let proofUrl;
-    let proofMeta;
+    let proofUrl, proofMeta;
     if (req.file) {
       const tmpPath = req.file.path;
       const destPath = `assets/${academicYear}/${Date.now()}_${req.file.originalname}`;
@@ -74,38 +91,62 @@ async function submitPositiveCredit(req, res, next) {
         try {
           proofUrl = await uploadFileToGitHub(tmpPath, destPath);
         } catch (err) {
-          console.warn('GitHub upload failed, falling back to local path:', err.message);
+          console.warn('GitHub upload failed, fallback to local:', err.message);
           proofUrl = `/uploads/${path.basename(tmpPath)}`;
         }
       } else {
         proofUrl = `/uploads/${path.basename(tmpPath)}`;
       }
 
-      proofMeta = { originalName: req.file.originalname, size: req.file.size, mimeType: req.file.mimetype };
-      try { fs.unlinkSync(tmpPath); } catch (e) {}
+      proofMeta = {
+        originalName: req.file.originalname,
+        size: req.file.size,
+        mimeType: req.file.mimetype,
+      };
+
+      try { fs.unlinkSync(tmpPath); } catch (e) { }
     }
 
-    const c = await Credit.create({
+    // Create the Credit
+    const creditDoc = await Credit.create({
       faculty: faculty._id,
-      facultySnapshot: { facultyID: faculty.facultyID, name: faculty.name, college: faculty.college },
+      facultySnapshot: {
+        facultyID: faculty.facultyID,
+        name: faculty.name,
+        college: faculty.college,
+        department: faculty.department,
+      },
       type: 'positive',
-      title: ct.title,
-      points: ct.points,
+      creditTitle: creditTitleDoc ? creditTitleDoc._id : undefined,
+      title,
+      points,
+      categories,
       proofUrl,
       proofMeta,
       academicYear,
       issuedBy: faculty._id,
       status: 'approved',
+      notes: notes || undefined,
     });
 
     // Update faculty credits
-    faculty.currentCredit = (faculty.currentCredit || 0) + ct.points;
-    const prevYearPoints = Number(faculty.creditsByYear?.get(academicYear) || 0);
-    faculty.creditsByYear.set(academicYear, prevYearPoints + ct.points);
+    faculty.currentCredit = (Number(faculty.currentCredit) || 0) + points;
+    if (faculty.creditsByYear && typeof faculty.creditsByYear.set === 'function') {
+      const prev = Number(faculty.creditsByYear.get(academicYear) || 0);
+      faculty.creditsByYear.set(academicYear, prev + points);
+    } else {
+      faculty.creditsByYear = faculty.creditsByYear || {};
+      const prev = Number(faculty.creditsByYear[academicYear] || 0);
+      faculty.creditsByYear[academicYear] = prev + points;
+    }
+
     await faculty.save();
 
-    res.status(201).json({ success: true, data: c });
+    res.status(201).json({ success: true, data: creditDoc });
   } catch (err) {
+    if (err.message && err.message.includes('File type not allowed')) {
+      return res.status(400).json({ success: false, message: err.message });
+    }
     next(err);
   }
 }
