@@ -25,7 +25,7 @@ async function updateCreditTitle(req, res, next) {
   }
 }
 
-// Delete (soft delete) credit title
+// Delete (soft delete) credit title.
 async function deleteCreditTitle(req, res, next) {
   try {
     const actor = req.user;
