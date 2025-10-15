@@ -4,7 +4,10 @@ const {
   createCreditTitle,
   listCreditTitles,
   updateCreditTitle,
-  deleteCreditTitle
+  deleteCreditTitle,
+   listPositiveCreditsForAdmin,
+  updatePositiveCreditStatus,
+  getPositiveCreditById
 } = require('../Controllers/adminController');
 const { authMiddleware, adminOnly } = require('../Middleware/authMiddleware');
 const multer = require('multer');
@@ -28,5 +31,26 @@ router.delete('/credit-title/:id', authMiddleware, adminOnly, deleteCreditTitle)
 
 // negative credit route
 router.post('/negative-credit', authMiddleware, adminOnly, upload.single('proof'), adminIssueNegativeCredit);
+
+router.get(
+  '/credits/positive',
+  authMiddleware,
+  adminOnly,
+  listPositiveCreditsForAdmin
+);
+
+router.put(
+  '/credits/positive/:id/status',
+  authMiddleware,
+  adminOnly,
+  updatePositiveCreditStatus
+);
+
+router.get(
+  '/credits/positive/:id',
+  authMiddleware,
+  adminOnly,
+  getPositiveCreditById
+);
 
 module.exports = router;
