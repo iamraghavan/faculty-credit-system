@@ -1,5 +1,7 @@
 const CreditTitle = require('../Models/CreditTitle');
-
+const mongoose = require('mongoose');
+const Credit = require('../Models/Credit');
+const User = require('../Models/User');
 
 async function createCreditTitle(req, res, next) {
 
