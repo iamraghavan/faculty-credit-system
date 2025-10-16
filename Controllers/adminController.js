@@ -163,7 +163,7 @@ async function listPositiveCreditsForAdmin(req, res, next) {
   }
 }
 
-/**
+/*
  * Get single positive credit by id
  */
 async function getPositiveCreditById(req, res, next) {
