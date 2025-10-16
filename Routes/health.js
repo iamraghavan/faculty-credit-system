@@ -1,7 +1,7 @@
 // routes/health.js
 const express = require('express');
 const router = express.Router();
-const healthController = require('../controllers/healthController.js');
+const healthController = require('../Controllers/healthController');
 
 router.get('/api/health', healthController.apiHealth);
 
