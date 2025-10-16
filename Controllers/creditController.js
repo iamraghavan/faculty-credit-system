@@ -122,7 +122,7 @@ async function submitPositiveCredit(req, res, next) {
       proofMeta,
       academicYear,
       issuedBy: faculty._id,
-      status: 'approved',
+      status: 'pending',
       notes: notes || undefined,
     });
 
@@ -199,7 +199,7 @@ async function adminIssueNegativeCredit(req, res, next) {
       proofMeta,
       academicYear,
       issuedBy: actor._id,
-      status: 'approved'
+      status: 'pending'
     });
 
     // Update faculty credits
