@@ -18,18 +18,19 @@ const userSchema = new mongoose.Schema(
       default: {}
     },
     isActive: { type: Boolean, default: true },
+
+    // 👇 New fields for profile management
+    phone: { type: String },
+    profileImage: { type: String }, // store image URL or file path
   },
   { timestamps: true }
 );
 
-
-// Add indexes for faster queries if needed
-userSchema.index({ facultyID: 1 });
+// Add indexes for faster queries
+// userSchema.index({ facultyID: 1 });
 userSchema.index({ department: 1 });
 userSchema.index({ college: 1 });
 userSchema.index({ role: 1 });
 userSchema.index({ isActive: 1 });
-
-
 
 module.exports = mongoose.model('User', userSchema);

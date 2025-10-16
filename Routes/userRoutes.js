@@ -1,17 +1,31 @@
 // Routes/userRoutes.js
 const express = require('express');
 const router = express.Router();
-const { getProfile, adminCreateUser, listUsers } = require('../Controllers/userController');
+const upload = require('../Middleware/upload');
+const {
+  getProfile,
+  updateProfile,
+  adminCreateUser,
+  listUsers,
+  getUserById,
+  adminUpdateUser,
+  deleteUser,
+} = require('../Controllers/userController');
 const { authMiddleware, adminOnly } = require('../Middleware/authMiddleware');
 
 /**
- * GET /api/v1/users/me  -> protected
- * POST /api/v1/users/   -> admin create user
- * GET /api/v1/users/    -> admin list users (pagination)
+ * User routes
  */
-
 router.get('/me', authMiddleware, getProfile);
+router.put('/me', authMiddleware, upload.single('profileImage'), updateProfile);
+
+/**
+ * Admin routes
+ */
 router.post('/', authMiddleware, adminOnly, adminCreateUser);
 router.get('/', authMiddleware, adminOnly, listUsers);
+router.get('/:id', authMiddleware, adminOnly, getUserById);
+router.put('/:id', authMiddleware, adminOnly, upload.single('profileImage'), adminUpdateUser);
+router.delete('/:id', authMiddleware, adminOnly, deleteUser);
 
 module.exports = router;
