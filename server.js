@@ -15,6 +15,9 @@ const userRoutes = require('./Routes/userRoutes');
 const creditRoutes = require('./Routes/creditRoutes');
 const adminRoutes = require('./Routes/adminRoutes');
 
+
+const healthRouter = require('./Routes/health');
+
 const app = express();
 
 app.use(express.json({ limit: '10mb' })); // parse JSON body
@@ -28,7 +31,7 @@ app.use(cors()); // enable CORS
 if (process.env.NODE_ENV !== 'production') {
   app.use(morgan('dev'));
 }
-
+app.use(healthRouter);
 
 app.use(rateLimitMiddleware);
 
