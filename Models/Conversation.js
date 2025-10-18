@@ -5,70 +5,60 @@ const { promisify } = require('util');
 const crypto = require('crypto');
 
 const gzip = promisify(zlib.gzip);
-const ungzip = promisify(zlib.unzip || zlib.gunzip); // prefer unzip if available, fallback to gunzip
+const ungzip = promisify(zlib.gunzip); // gunzip works on gzip buffers
 const { Schema } = mongoose;
 
-/*
-Message shape (stored inside compressed segments)
-{
-  _id: ObjectId,
-  sender: ObjectId,
-  senderSnapshot: { name, facultyID, college, department },
-  type: 'positive'|'negative'|'system',
-  content: { text: String, meta: Object },
-  createdAt: Date
-}
-*/
-
-const SEGMENT_MESSAGE_LIMIT = 100;         // max messages per compressed segment
-const SEGMENT_BYTE_THRESHOLD = 64 * 1024;  // 64KB target per segment
-
-const messageSegmentSchema = new Schema(
-  {
-    data: { type: Buffer, required: true },       // gzip Buffer
-    messageCount: { type: Number, required: true },
-    firstMessageAt: { type: Date, required: true },
-    lastMessageAt: { type: Date, required: true },
-    checksum: { type: String, required: true },
-    createdAt: { type: Date, default: Date.now },
-  },
-  { _id: false }
-);
-
-const conversationSchema = new Schema(
-  {
-    credit: { type: Schema.Types.ObjectId, ref: 'Credit', required: true },
-    participants: [{ type: Schema.Types.ObjectId, ref: 'User', required: true }],
-    createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    status: { type: String, enum: ['open', 'resolved', 'archived'], default: 'open' },
-
-    messageSegments: { type: [messageSegmentSchema], default: [] },
-
-    // lastMessage as an embedded sub-document (not a String) — ensures proper casting
-    lastMessage: {
-      text: { type: String },
-      sender: { type: Schema.Types.ObjectId, ref: 'User' },
-      createdAt: { type: Date },
-      type: { type: String },
-    },
-
-    totalMessages: { type: Number, default: 0 },
-    unreadCounts: { type: Map, of: Number, default: {} },
-  },
-  { timestamps: true }
-);
+/* -------------------------
+   Constants
+------------------------- */
+const SEGMENT_MESSAGE_LIMIT = 100;        // max messages per compressed segment
+const SEGMENT_BYTE_THRESHOLD = 64 * 1024; // ~64KB per segment
 
 /* -------------------------
-   Helpers: compress / decompress
-   ------------------------- */
+   Message Segment Schema
+------------------------- */
+const messageSegmentSchema = new Schema({
+  data: { type: Buffer, required: true }, // compressed gzip buffer
+  messageCount: { type: Number, required: true },
+  firstMessageAt: { type: Date, required: true },
+  lastMessageAt: { type: Date, required: true },
+  checksum: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now },
+}, { _id: false });
+
+/* -------------------------
+   Conversation Schema
+------------------------- */
+const conversationSchema = new Schema({
+  credit: { type: Schema.Types.ObjectId, ref: 'Credit', required: true },
+  participants: [{ type: Schema.Types.ObjectId, ref: 'User', required: true }],
+  createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  status: { type: String, enum: ['open', 'resolved', 'archived'], default: 'open' },
+
+  messageSegments: { type: [messageSegmentSchema], default: [] },
+
+  lastMessage: {
+    text: String,
+    sender: { type: Schema.Types.ObjectId, ref: 'User' },
+    createdAt: Date,
+    type: String,
+  },
+
+  totalMessages: { type: Number, default: 0 },
+  unreadCounts: { type: Map, of: Number, default: {} },
+}, { timestamps: true });
+
+/* -------------------------
+   Utilities: compress / decompress
+------------------------- */
 async function compressMessages(messagesArray) {
   const json = JSON.stringify(messagesArray);
-  const buf = Buffer.from(json, 'utf8');
-  return await gzip(buf);
+  return await gzip(Buffer.from(json, 'utf8'));
 }
 
-async function decompressMessages(buffer) {
-  // NOTE: zlib.unzip/gunzip both supported; use the chosen promisified function
+async function decompressMessages(binary) {
+  // Convert MongoDB Binary to Node.js Buffer
+  const buffer = Buffer.isBuffer(binary) ? binary : Buffer.from(binary.buffer);
   const decompressed = await ungzip(buffer);
   return JSON.parse(decompressed.toString('utf8'));
 }
@@ -78,14 +68,13 @@ function checksumBuffer(buf) {
 }
 
 /* -------------------------
-   appendMessage static
-   ------------------------- */
+   Append a message
+------------------------- */
 conversationSchema.statics.appendMessage = async function (conversationId, message) {
   const Conversation = this;
   const MAX_RETRIES = 5;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    // snapshot
     const convo = await Conversation.findById(conversationId)
       .select('messageSegments totalMessages lastMessage participants')
       .exec();
@@ -94,15 +83,14 @@ conversationSchema.statics.appendMessage = async function (conversationId, messa
     const segments = convo.messageSegments || [];
     const lastSegment = segments.length ? segments[segments.length - 1] : null;
 
-    // prepare lastMessage subfields
     const lastMessageFields = {
-      'lastMessage.text': message.content && message.content.text ? message.content.text : '',
+      'lastMessage.text': message.content?.text || '',
       'lastMessage.sender': message.sender,
       'lastMessage.createdAt': message.createdAt,
       'lastMessage.type': message.type,
     };
 
-    // If no segment exists -> create first segment
+    // --- If no segments, create the first one ---
     if (!lastSegment) {
       const messages = [{ ...message, _id: new mongoose.Types.ObjectId() }];
       const compressed = await compressMessages(messages);
@@ -125,19 +113,17 @@ conversationSchema.statics.appendMessage = async function (conversationId, messa
       ).exec();
 
       if (updated) return updated;
-      continue; // retry if race
+      continue;
     }
 
-    // Decompress and decide whether to append or create new segment
+    // --- Decompress last segment ---
     const decompressed = await decompressMessages(lastSegment.data);
-    const willExceedMessageCount = decompressed.length + 1 > SEGMENT_MESSAGE_LIMIT;
-    const candidateJsonSize =
-      Buffer.byteLength(JSON.stringify(decompressed), 'utf8') +
-      Buffer.byteLength(JSON.stringify(message), 'utf8');
-    const willExceedByteLimit = candidateJsonSize > SEGMENT_BYTE_THRESHOLD;
+    const willExceedCount = decompressed.length + 1 > SEGMENT_MESSAGE_LIMIT;
+    const willExceedBytes = Buffer.byteLength(JSON.stringify(decompressed), 'utf8') +
+                            Buffer.byteLength(JSON.stringify(message), 'utf8') > SEGMENT_BYTE_THRESHOLD;
 
-    if (willExceedMessageCount || willExceedByteLimit) {
-      // create new segment
+    if (willExceedCount || willExceedBytes) {
+      // Create new segment
       const newMessages = [{ ...message, _id: new mongoose.Types.ObjectId() }];
       const compressedNew = await compressMessages(newMessages);
       const segmentObj = {
@@ -159,12 +145,13 @@ conversationSchema.statics.appendMessage = async function (conversationId, messa
       ).exec();
 
       if (updated) return updated;
-      continue; // retry
+      continue;
     }
 
-    // append into existing last segment
+    // --- Append to last segment ---
     decompressed.push({ ...message, _id: new mongoose.Types.ObjectId() });
     const recompressed = await compressMessages(decompressed);
+
     const updatedSegmentFields = {
       'messageSegments.$.data': recompressed,
       'messageSegments.$.messageCount': decompressed.length,
@@ -172,7 +159,6 @@ conversationSchema.statics.appendMessage = async function (conversationId, messa
       'messageSegments.$.checksum': checksumBuffer(recompressed),
     };
 
-    // atomic match for last-segment snapshot
     const query = {
       _id: conversationId,
       'messageSegments.messageCount': lastSegment.messageCount,
@@ -180,61 +166,50 @@ conversationSchema.statics.appendMessage = async function (conversationId, messa
       'messageSegments.checksum': lastSegment.checksum,
     };
 
-    // combine segment updates and lastMessage updates into a single $set
-    const setObject = {
-      ...updatedSegmentFields,
-      ...lastMessageFields,
-    };
+    const setObject = { ...updatedSegmentFields, ...lastMessageFields };
 
     const updated = await Conversation.findOneAndUpdate(
       query,
-      {
-        $set: setObject,
-        $inc: { totalMessages: 1 },
-      },
+      { $set: setObject, $inc: { totalMessages: 1 } },
       { new: true }
     ).exec();
 
     if (updated) return updated;
-
-    // else loop and retry
   }
 
   throw new Error('Failed to append message after retries');
 };
 
 /* -------------------------
-   getMessagesPaginated static
-   ------------------------- */
+   Get paginated messages
+------------------------- */
 conversationSchema.statics.getMessagesPaginated = async function (conversationId, options = {}) {
-  const Conversation = this;
   const limit = Math.min(options.limit || 50, 500);
   const before = options.before ? new Date(options.before) : null;
 
-  const convo = await Conversation.findById(conversationId).select('messageSegments').lean();
+  const convo = await this.findById(conversationId).select('messageSegments').lean();
   if (!convo) throw new Error('Conversation not found');
 
-  const segments = convo.messageSegments || [];
   const results = [];
+  const segments = convo.messageSegments || [];
 
-  // iterate from newest segments backwards until we collect `limit` messages
   for (let i = segments.length - 1; i >= 0 && results.length < limit; i--) {
     const seg = segments[i];
-    const messages = await decompressMessages(seg.data); // chronological within segment
+    const messages = await decompressMessages(seg.data);
     const filtered = before ? messages.filter(m => new Date(m.createdAt) < before) : messages;
+
     for (let j = filtered.length - 1; j >= 0 && results.length < limit; j--) {
       results.push(filtered[j]);
     }
   }
 
-  // convert newest->oldest into chronological order
   results.reverse();
   return results;
 };
 
 /* -------------------------
-   Indexes & model export
-   ------------------------- */
+   Indexes & Export
+------------------------- */
 conversationSchema.index({ credit: 1 });
 conversationSchema.index({ participants: 1 });
 conversationSchema.index({ updatedAt: -1 });
