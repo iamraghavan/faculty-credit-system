@@ -2,8 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const conversationController = require('../Controllers/conversationController');
-const authMiddleware = require('../Middleware/authMiddleware');
-
+const { authMiddleware, adminOnly } = require('../Middleware/authMiddleware');
 // Apply authentication middleware to all routes
 router.use(authMiddleware);
 
@@ -12,14 +11,14 @@ router.use(authMiddleware);
  * @desc    Create or fetch a conversation for a credit
  * @access  Authenticated users
  */
-router.post('/', conversationController.createConversation);
+router.post('/', authMiddleware, conversationController.createConversation);
 
 /**
  * @route   POST /api/conversations/:id/message
  * @desc    Send a message in a conversation (REST fallback if WebSocket unavailable)
  * @access  Participants or admin
  */
-router.post('/:id/message', conversationController.sendMessage);
+router.post('/:id/message', authMiddleware,conversationController.sendMessage);
 
 /**
  * @route   GET /api/conversations/:id/messages
@@ -27,7 +26,7 @@ router.post('/:id/message', conversationController.sendMessage);
  * @query   limit, before (ISO timestamp)
  * @access  Participants or admin
  */
-router.get('/:id/messages', conversationController.getMessages);
+router.get('/:id/messages', authMiddleware,conversationController.getMessages);
 
 /**
  * @route   GET /api/conversations
@@ -35,6 +34,6 @@ router.get('/:id/messages', conversationController.getMessages);
  * @query   page, perPage
  * @access  Authenticated users
  */
-router.get('/', conversationController.listConversations);
+router.get('/', authMiddleware,conversationController.listConversations);
 
 module.exports = router;
