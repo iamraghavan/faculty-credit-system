@@ -14,7 +14,7 @@ const authRoutes = require('./Routes/authRoutes');
 const userRoutes = require('./Routes/userRoutes');
 const creditRoutes = require('./Routes/creditRoutes');
 const adminRoutes = require('./Routes/adminRoutes');
-
+const conversationRoutes = require('./Routes/conversations');
 
 const healthRouter = require('./Routes/health');
 
@@ -45,6 +45,7 @@ app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/credits', creditRoutes);
 app.use('/api/v1/admin', adminRoutes);
+app.use('/api/v1/conversations', conversationRoutes);
 
 
 app.use(errorHandler);

@@ -1,0 +1,122 @@
+{
+  "info": {
+    "name": "Credit Hub - Conversations API",
+    "_postman_id": "9d9f6a0c-1234-4e12-b456-abcdef123456",
+    "description": "REST API endpoints for conversation/chat system",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/health",
+          "host": ["{{base_url}}"],
+          "path": ["api", "health"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "List Conversations",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/conversations?page=0&perPage=20",
+          "host": ["{{base_url}}"],
+          "path": ["api", "conversations"],
+          "query": [
+            { "key": "page", "value": "0" },
+            { "key": "perPage", "value": "20" }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Create or Fetch Conversation",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"creditId\": \"64fabc1234567890\",\n    \"participantIds\": [\"64fdef1234567890\"]\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/conversations",
+          "host": ["{{base_url}}"],
+          "path": ["api", "conversations"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Send Message",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"text\": \"Hello team!\",\n    \"type\": \"positive\",\n    \"meta\": {}\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/conversations/{{conversation_id}}/message",
+          "host": ["{{base_url}}"],
+          "path": ["api", "conversations", "{{conversation_id}}", "message"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Messages",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/conversations/{{conversation_id}}/messages?limit=50&before=",
+          "host": ["{{base_url}}"],
+          "path": ["api", "conversations", "{{conversation_id}}", "messages"],
+          "query": [
+            { "key": "limit", "value": "50" },
+            { "key": "before", "value": "" }
+          ]
+        }
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000", "type": "string" },
+    { "key": "jwt_token", "value": "", "type": "string" },
+    { "key": "conversation_id", "value": "", "type": "string" }
+  ]
+}
