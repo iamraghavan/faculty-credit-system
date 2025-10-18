@@ -1,15 +1,26 @@
-// index.js - entry point
+// index.js
 require('dotenv').config();
-const app = require('./server');
+const http = require('http');
+const app = require('./server');        // your Express app
 const connectDB = require('./config/db');
-const { startSelfPinger } = require('./utils/selfPinger'); // <-- add this line
+const { startSelfPinger } = require('./utils/selfPinger');
+const { attachSocket } = require('./realtime/socketServer'); // make sure path is correct
 
 const PORT = process.env.PORT || 8000;
 
-// Connect to MongoDB first
-connectDB()
-  .then(() => {
-    const server = app.listen(PORT, () => {
+(async function start() {
+  try {
+    await connectDB();
+    // create raw http server from express app
+    const server = http.createServer(app);
+
+    // attach socket.io to the http server
+    const io = attachSocket(server, { corsOrigin: process.env.CORS_ORIGIN || '*' });
+    // store io for later use (ex: emitting from REST controllers or shutdown)
+    app.locals.io = io;
+
+    // start listening
+    server.listen(PORT, () => {
       console.log(`✅ Server started on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
 
       // ---- SELF-PINGER START ----
@@ -27,17 +38,37 @@ connectDB()
       // ---- SELF-PINGER END ----
     });
 
-    // Handle graceful shutdown (optional)
-    process.on('SIGINT', () => {
+    // graceful shutdown: close http server and socket.io, stop pinger
+    const gracefulShutdown = async () => {
       console.log('🛑 Shutting down gracefully...');
-      if (app.locals._selfPinger) app.locals._selfPinger.stop();
-      server.close(() => {
-        console.log('✅ Server closed');
-        process.exit(0);
-      });
-    });
-  })
-  .catch((err) => {
-    console.error('❌ Failed to start server due to DB error:', err);
+      try {
+        if (app.locals._selfPinger) {
+          try { app.locals._selfPinger.stop(); } catch(e) { /* ignore */ }
+        }
+        // stop accepting new connections
+        server.close(() => {
+          console.log('✅ HTTP server closed');
+        });
+
+        // close socket.io (disconnects clients)
+        if (io && io.close) {
+          io.close();
+          console.log('✅ Socket.IO closed');
+        }
+
+        // optional: give a few seconds for connections to drain
+        setTimeout(() => process.exit(0), 2000);
+      } catch (err) {
+        console.error('Error during shutdown', err);
+        process.exit(1);
+      }
+    };
+
+    process.on('SIGINT', gracefulShutdown);
+    process.on('SIGTERM', gracefulShutdown);
+
+  } catch (err) {
+    console.error('❌ Failed to start server due to:', err);
     process.exit(1);
-  });
+  }
+})();
