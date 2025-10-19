@@ -181,7 +181,11 @@ async function appealNegativeCredit(req, res, next) {
   }
 }
 
-exports.listCreditsForFaculty = async (req, res, next) => {
+/**
+ * List credits for faculty (frontend-friendly)
+ * GET /api/v1/credits/faculty/:facultyId?academicYear=2024-2025&status=Approved&page=1&limit=20
+ */
+async function listCreditsForFaculty(req, res, next) {
   try {
     const { facultyId } = req.params;
     const { page = 1, limit = 20, academicYear, status } = req.query;
@@ -229,6 +233,7 @@ exports.listCreditsForFaculty = async (req, res, next) => {
     next(err);
   }
 };
+
 
 /**
  * Admin creates credit title
