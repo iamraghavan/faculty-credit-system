@@ -9,20 +9,28 @@ const {
   deleteCreditTitle,
   listPositiveCreditsForAdmin,
   updatePositiveCreditStatus,
-  getPositiveCreditById
+  getPositiveCreditById,
+  issueNegativeCredit,
+  listNegativeCreditsForFaculty
 } = require('../Controllers/adminController');
 
 const { authMiddleware, adminOnly } = require('../Middleware/authMiddleware');
-const { adminIssueNegativeCredit } = require('../Controllers/creditController');
 
 // Multer configuration for file uploads
 const upload = multer({
   dest: 'tmp/uploads/',
-  limits: { fileSize: 10 * 1024 * 1024 } // 10 MB
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  fileFilter: (req, file, cb) => {
+    // only allow images/pdf
+    if (!file.mimetype.match(/\/(jpeg|png|jpg|pdf)$/)) {
+      return cb(new Error('File type not supported'), false);
+    }
+    cb(null, true);
+  }
 });
 
 /**
- * Admin endpoints for Credit Titles
+ * Credit Titles
  */
 router.post('/credit-title', authMiddleware, adminOnly, createCreditTitle);
 router.get('/credit-title', authMiddleware, listCreditTitles);
@@ -30,15 +38,20 @@ router.put('/credit-title/:id', authMiddleware, adminOnly, updateCreditTitle);
 router.delete('/credit-title/:id', authMiddleware, adminOnly, deleteCreditTitle);
 
 /**
- * Admin endpoint for issuing negative credits (with proof)
- */
-router.post('/negative-credit', authMiddleware, adminOnly, upload.single('proof'), adminIssueNegativeCredit);
-
-/**
- * Admin endpoints for managing positive Good Works submissions
+ * Positive credits management
  */
 router.get('/credits/positive', authMiddleware, adminOnly, listPositiveCreditsForAdmin);
 router.get('/credits/positive/:id', authMiddleware, adminOnly, getPositiveCreditById);
 router.put('/credits/positive/:id/status', authMiddleware, adminOnly, updatePositiveCreditStatus);
+
+/**
+ * Negative credits issued by admin to faculty
+ */
+router.post('/credits/negative', authMiddleware, adminOnly, upload.single('proof'), issueNegativeCredit);
+
+/**
+ * Faculty negative credits endpoint (frontend-friendly)
+ */
+router.get('/faculty/:facultyId/credits/negative', authMiddleware, listNegativeCreditsForFaculty);
 
 module.exports = router;

@@ -1,111 +1,63 @@
-// Controllers/creditController.js
 const Credit = require('../Models/Credit');
 const User = require('../Models/User');
 const CreditTitle = require('../Models/CreditTitle');
-const { uploadFileToGitHub } = require('../utils/githubUpload'); // optional
-const path = require('path');
+const { uploadFileToGitHub } = require('../utils/githubUpload');
 const fs = require('fs');
+const path = require('path');
 const { sendEmail } = require('../utils/email');
+const mongoose = require('mongoose');
+const io = require('../socket'); // import socket instance
 
 /**
- * Admin creates a credit title (positive or negative)
+ * Helper: handle file upload and return proofUrl & proofMeta
  */
-async function createCreditTitle(req, res, next) {
-  try {
-    const actor = req.user;
-    if (!actor || actor.role !== 'admin') 
-      return res.status(403).json({ success: false, message: 'Forbidden' });
+async function handleFileUpload(file, academicYear) {
+  if (!file) return {};
 
-    const { title, points, type, description } = req.body;
-    if (!title || !points) 
-      return res.status(400).json({ success: false, message: 'Missing required fields' });
+  const tmpPath = file.path;
+  const destPath = `assets/${academicYear}/${Date.now()}_${file.originalname}`;
+  let proofUrl;
 
-    const ct = await CreditTitle.create({
-      title,
-      points,
-      type: type || 'positive',
-      description,
-      createdBy: actor._id,
-    });
-
-    res.status(201).json({ success: true, data: ct });
-  } catch (err) {
-    next(err);
+  if (process.env.GITHUB_TOKEN && process.env.ASSET_GH_REPO && process.env.ASSET_GH_OWNER) {
+    try { proofUrl = await uploadFileToGitHub(tmpPath, destPath); } 
+    catch { proofUrl = `/uploads/${path.basename(tmpPath)}`; }
+  } else {
+    proofUrl = `/uploads/${path.basename(tmpPath)}`;
   }
+
+  try { fs.unlinkSync(tmpPath); } catch {}
+
+  return { proofUrl, proofMeta: { originalName: file.originalname, size: file.size, mimeType: file.mimetype } };
 }
 
 /**
- * List active credit titles (faculty/admin)
+ * Faculty submits positive credit
  */
-async function listCreditTitles(req, res, next) {
-  try {
-    const items = await CreditTitle.find({ isActive: true });
-    res.json({ success: true, total: items.length, items });
-  } catch (err) {
-    next(err);
-  }
-}
-
 async function submitPositiveCredit(req, res, next) {
   try {
     const faculty = req.user;
-    if (!faculty || faculty.role !== 'faculty') {
-      return res.status(403).json({ success: false, message: 'Forbidden' });
-    }
+    if (!faculty || faculty.role !== 'faculty') return res.status(403).json({ success: false, message: 'Forbidden' });
 
     let { title, points, categories, academicYear, notes } = req.body;
-
-    if (!title || !points || !academicYear) {
-      return res.status(400).json({ success: false, message: 'Missing required fields: title, points, or academicYear' });
-    }
+    if (!title || !points || !academicYear) return res.status(400).json({ success: false, message: 'Missing required fields' });
 
     points = Number(points);
-    if (Number.isNaN(points) || points <= 0) {
-      return res.status(400).json({ success: false, message: 'Points must be a positive number' });
-    }
+    if (points <= 0 || isNaN(points)) return res.status(400).json({ success: false, message: 'Points must be a positive number' });
 
-    // Parse categories into an array of ObjectIds
+    // Validate category IDs
     let categoryIds = [];
     if (categories) {
-      if (!Array.isArray(categories)) {
-        categories = String(categories).split(','); // accept CSV too
-      }
+      if (!Array.isArray(categories)) categories = String(categories).split(',');
       categoryIds = categories.map(c => c.trim()).filter(Boolean);
-      // validate IDs exist in CreditTitle
       const validCategories = await CreditTitle.find({ _id: { $in: categoryIds } }).select('_id');
       const validIds = validCategories.map(c => c._id.toString());
       const invalidIds = categoryIds.filter(c => !validIds.includes(c));
-      if (invalidIds.length > 0) {
-        return res.status(400).json({ success: false, message: 'Invalid CreditTitle ID(s) for categories', invalidIds });
-      }
-      // store as ObjectId array
+      if (invalidIds.length > 0) return res.status(400).json({ success: false, message: 'Invalid category IDs', invalidIds });
       categoryIds = validCategories.map(c => c._id);
     }
 
-    // Handle proof file
-    let proofUrl, proofMeta;
-    if (req.file) {
-      const tmpPath = req.file.path;
-      const destPath = `assets/${academicYear}/${Date.now()}_${req.file.originalname}`;
-      if (process.env.GITHUB_TOKEN && process.env.ASSET_GH_REPO && process.env.ASSET_GH_OWNER) {
-        try {
-          proofUrl = await uploadFileToGitHub(tmpPath, destPath);
-        } catch (err) {
-          console.warn('GitHub upload failed, fallback to local:', err.message);
-          proofUrl = `/uploads/${path.basename(tmpPath)}`;
-        }
-      } else {
-        proofUrl = `/uploads/${path.basename(tmpPath)}`;
-      }
-      proofMeta = {
-        originalName: req.file.originalname,
-        size: req.file.size,
-        mimeType: req.file.mimetype,
-      };
-      try { fs.unlinkSync(tmpPath); } catch (e) {}
-    }
+    const { proofUrl, proofMeta } = await handleFileUpload(req.file, academicYear);
 
-    // Create the Credit
     const creditDoc = await Credit.create({
       faculty: faculty._id,
       facultySnapshot: {
@@ -117,79 +69,52 @@ async function submitPositiveCredit(req, res, next) {
       type: 'positive',
       title,
       points,
-      categories: categoryIds, // store array of CreditTitle _id
+      categories: categoryIds,
       proofUrl,
       proofMeta,
       academicYear,
       issuedBy: faculty._id,
       status: 'pending',
-      notes: notes || undefined,
+      notes: notes || undefined
     });
 
     // Update faculty credits
-    faculty.currentCredit = (Number(faculty.currentCredit) || 0) + points;
-    if (faculty.creditsByYear && typeof faculty.creditsByYear.set === 'function') {
-      const prev = Number(faculty.creditsByYear.get(academicYear) || 0);
-      faculty.creditsByYear.set(academicYear, prev + points);
-    } else {
-      faculty.creditsByYear = faculty.creditsByYear || {};
-      const prev = Number(faculty.creditsByYear[academicYear] || 0);
-      faculty.creditsByYear[academicYear] = prev + points;
-    }
+    faculty.currentCredit = (faculty.currentCredit || 0) + points;
+    faculty.creditsByYear = faculty.creditsByYear || {};
+    faculty.creditsByYear[academicYear] = (faculty.creditsByYear[academicYear] || 0) + points;
     await faculty.save();
+
+    // Emit socket update
+    io.emit(`faculty:${faculty._id}:creditUpdate`, creditDoc);
 
     res.status(201).json({ success: true, data: creditDoc });
   } catch (err) {
-    if (err.message && err.message.includes('File type not allowed')) {
-      return res.status(400).json({ success: false, message: err.message });
-    }
     next(err);
   }
 }
 
-
 /**
- * Admin issues negative credit to a faculty (with email notification)
+ * Admin issues negative credit
  */
 async function adminIssueNegativeCredit(req, res, next) {
+  const session = await mongoose.startSession();
+  session.startTransaction();
   try {
     const actor = req.user;
-    if (!actor || actor.role !== 'admin') 
-      return res.status(403).json({ success: false, message: 'Forbidden' });
-
     const { facultyId, creditTitleId, academicYear, notes } = req.body;
-    if (!facultyId || !creditTitleId || !academicYear) 
-      return res.status(400).json({ success: false, message: 'Missing fields' });
 
-    const faculty = await User.findById(facultyId);
+    if (!facultyId || !creditTitleId || !academicYear)
+      return res.status(400).json({ success: false, message: 'Missing required fields' });
+
+    const faculty = await User.findById(facultyId).session(session);
     if (!faculty) return res.status(404).json({ success: false, message: 'Faculty not found' });
 
-    const ct = await CreditTitle.findById(creditTitleId);
-    if (!ct || ct.type !== 'negative')
-      return res.status(400).json({ success: false, message: 'Invalid negative credit title' });
+    const ct = await CreditTitle.findById(creditTitleId).session(session);
+    if (!ct || ct.type !== 'negative') return res.status(400).json({ success: false, message: 'Invalid negative credit title' });
 
-    // Handle proof file
-    let proofUrl;
-    let proofMeta;
-    if (req.file) {
-      const tmpPath = req.file.path;
-      const destPath = `assets/${academicYear}/${Date.now()}_${req.file.originalname}`;
+    const { proofUrl, proofMeta } = await handleFileUpload(req.file, academicYear);
 
-      if (process.env.GITHUB_TOKEN && process.env.ASSET_GH_REPO && process.env.ASSET_GH_OWNER) {
-        try {
-          proofUrl = await uploadFileToGitHub(tmpPath, destPath);
-        } catch (err) {
-          proofUrl = `/uploads/${path.basename(tmpPath)}`;
-        }
-      } else {
-        proofUrl = `/uploads/${path.basename(tmpPath)}`;
-      }
-
-      proofMeta = { originalName: req.file.originalname, size: req.file.size, mimeType: req.file.mimetype };
-      try { fs.unlinkSync(tmpPath); } catch (e) {}
-    }
-
-    const c = await Credit.create({
+    const c = await Credit.create([{
       faculty: faculty._id,
       facultySnapshot: { facultyID: faculty.facultyID, name: faculty.name, college: faculty.college },
       type: 'negative',
@@ -199,28 +124,32 @@ async function adminIssueNegativeCredit(req, res, next) {
       proofMeta,
       academicYear,
       issuedBy: actor._id,
-      status: 'pending'
-    });
+      status: 'pending',
+      notes
+    }], { session });
 
-    // Update faculty credits
     faculty.currentCredit = (faculty.currentCredit || 0) - Math.abs(ct.points);
-    const prevYearPoints = Number(faculty.creditsByYear?.get(academicYear) || 0);
-    faculty.creditsByYear.set(academicYear, prevYearPoints - Math.abs(ct.points));
-    await faculty.save();
+    faculty.creditsByYear = faculty.creditsByYear || {};
+    faculty.creditsByYear[academicYear] = (faculty.creditsByYear[academicYear] || 0) - Math.abs(ct.points);
+    await faculty.save({ session });
 
-    // Send email notification
-    try {
-      await sendEmail({
-        to: faculty.email,
-        subject: `Negative Credit Issued: ${ct.title}`,
-        text: `Dear ${faculty.name},\n\nA negative credit (${ct.points}) has been issued against you for ${academicYear}.\nReason: ${notes || 'Not provided'}\n\nRegards,\nAdmin`
-      });
-    } catch (err) {
-      console.warn('Failed to send email:', err.message);
-    }
+    await session.commitTransaction();
+    session.endSession();
 
-    res.status(201).json({ success: true, data: c });
+    // Emit socket update
+    io.emit(`faculty:${faculty._id}:creditUpdate`, c[0]);
+
+    // Email notification (async)
+    sendEmail({
+      to: faculty.email,
+      subject: `Negative Credit Issued: ${ct.title}`,
+      text: `A negative credit (${ct.points}) has been issued against you for ${academicYear}. Reason: ${notes || 'Not provided'}`
+    }).catch(() => {});
+
+    res.status(201).json({ success: true, data: c[0] });
   } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
     next(err);
   }
 }
@@ -231,36 +160,20 @@ async function adminIssueNegativeCredit(req, res, next) {
 async function appealNegativeCredit(req, res, next) {
   try {
     const actor = req.user;
-    if (!actor) return res.status(401).json({ success: false, message: 'Unauthorized' });
-
     const { creditId, reason } = req.body;
-    if (!creditId || !reason) return res.status(400).json({ success: false, message: 'Missing fields' });
+
+    if (!reason) return res.status(400).json({ success: false, message: 'Appeal reason required' });
 
     const credit = await Credit.findById(creditId);
     if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
     if (credit.type !== 'negative') return res.status(400).json({ success: false, message: 'Only negative credits can be appealed' });
-    if (String(credit.faculty) !== String(actor._id) && actor.role !== 'admin') {
-      return res.status(403).json({ success: false, message: 'Only affected faculty or admin can appeal' });
-    }
+    if (String(credit.faculty) !== String(actor._id) && actor.role !== 'admin') return res.status(403).json({ success: false, message: 'Unauthorized' });
 
     credit.appeal = { by: actor._id, reason, createdAt: new Date(), status: 'pending' };
     credit.status = 'appealed';
     await credit.save();
 
-    // Email admins
-    const admins = await User.find({ role: 'admin' });
-    const adminEmails = admins.map(a => a.email).filter(Boolean);
-    if (adminEmails.length) {
-      try {
-        await sendEmail({
-          to: adminEmails.join(','),
-          subject: `Appeal for Negative Credit: ${credit.title}`,
-          text: `Faculty ${actor.name} has appealed credit ${credit._id}.\nReason:\n${reason}`
-        });
-      } catch (err) {
-        console.warn('Failed to send appeal email:', err.message);
-      }
-    }
+    io.emit(`admin:appealNotification`, credit);
 
     res.json({ success: true, data: credit });
   } catch (err) {
@@ -269,7 +182,7 @@ async function appealNegativeCredit(req, res, next) {
 }
 
 /**
- * List credits for a faculty (with pagination)
+ * List credits for faculty (frontend-friendly)
  */
 async function listCreditsForFaculty(req, res, next) {
   try {
@@ -280,8 +193,10 @@ async function listCreditsForFaculty(req, res, next) {
     if (academicYear) filter.academicYear = academicYear;
 
     const skip = (Number(page) - 1) * Number(limit);
-    const total = await Credit.countDocuments(filter);
-    const items = await Credit.find(filter).sort({ createdAt: -1 }).skip(skip).limit(Number(limit));
+    const [total, items] = await Promise.all([
+      Credit.countDocuments(filter),
+      Credit.find(filter).sort({ createdAt: -1 }).skip(skip).limit(Number(limit))
+    ]);
 
     res.json({ success: true, total, page: Number(page), limit: Number(limit), items });
   } catch (err) {
@@ -289,11 +204,35 @@ async function listCreditsForFaculty(req, res, next) {
   }
 }
 
+/**
+ * Admin creates credit title
+ */
+async function createCreditTitle(req, res, next) {
+  try {
+    const actor = req.user;
+    const { title, points, type, description } = req.body;
+    if (!title || !points) return res.status(400).json({ success: false, message: 'Title and points are required' });
+
+    const ct = await CreditTitle.create({ title, points, type: type || 'positive', description, createdBy: actor._id });
+    res.status(201).json({ success: true, data: ct });
+  } catch (err) { next(err); }
+}
+
+/**
+ * List credit titles
+ */
+async function listCreditTitles(req, res, next) {
+  try {
+    const items = await CreditTitle.find({ isActive: true });
+    res.json({ success: true, total: items.length, items });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
-  createCreditTitle,
-  listCreditTitles,
   submitPositiveCredit,
-  adminIssueNegativeCredit,
   appealNegativeCredit,
-  listCreditsForFaculty
+  listCreditsForFaculty,
+  adminIssueNegativeCredit,
+  createCreditTitle,
+  listCreditTitles
 };
