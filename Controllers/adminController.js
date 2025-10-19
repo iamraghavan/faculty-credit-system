@@ -255,6 +255,151 @@ async function getPositiveCreditById(req, res, next) {
   }
 }
 
+
+/**
+ * ADMIN: List all negative credits (paginated + filters)
+ * GET /api/v1/admin/credits/negative
+ * Query: page, limit, academicYear, status, facultyId, sort, search
+ */
+async function adminListNegativeCredits(req, res, next) {
+  try {
+    const {
+      page = 1,
+      limit = 20,
+      academicYear,
+      status,
+      facultyId,
+      sort = '-createdAt',
+      search
+    } = req.query;
+
+    const filter = { type: 'negative' };
+
+    if (academicYear && String(academicYear).trim().toLowerCase() !== 'all') {
+      filter.academicYear = String(academicYear).trim();
+    }
+
+    if (status && String(status).trim().toLowerCase() !== 'all') {
+      const s = String(status).trim().toLowerCase();
+      const allowed = ['pending', 'approved', 'rejected', 'appealed'];
+      if (!allowed.includes(s)) {
+        return res.status(400).json({ success: false, message: `Invalid status. Allowed: ${allowed.join(', ')}` });
+      }
+      filter.status = s;
+    }
+
+    if (facultyId) {
+      if (!mongoose.isValidObjectId(facultyId)) {
+        return res.status(400).json({ success: false, message: 'Invalid facultyId' });
+      }
+      filter.faculty = facultyId;
+    }
+
+    if (search) {
+      const q = String(search).trim();
+      filter.$or = [
+        { title: { $regex: q, $options: 'i' } },
+        { notes: { $regex: q, $options: 'i' } },
+        { 'facultySnapshot.name': { $regex: q, $options: 'i' } },
+        { 'facultySnapshot.facultyID': { $regex: q, $options: 'i' } }
+      ];
+    }
+
+    const skip = (Math.max(Number(page), 1) - 1) * Math.max(Number(limit), 1);
+
+    const [total, items] = await Promise.all([
+      Credit.countDocuments(filter),
+      Credit.find(filter)
+        .sort(sort)
+        .skip(skip)
+        .limit(Math.max(Number(limit), 1))
+        .populate('faculty', 'name facultyID email college department')
+        .populate('issuedBy', 'name email role')
+        .populate('creditTitle', 'title points type')
+        .lean()
+    ]);
+
+    return res.json({
+      success: true,
+      total,
+      page: Number(page),
+      limit: Number(limit),
+      items
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/**
+ * ADMIN: Get a single negative credit by id
+ * GET /api/v1/admin/credits/negative/:id
+ */
+async function adminGetNegativeCreditById(req, res, next) {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid credit id' });
+    }
+
+    const credit = await Credit.findById(id)
+      .populate('faculty', 'name facultyID email college department')
+      .populate('issuedBy', 'name email role')
+      .populate('creditTitle', 'title points type')
+      .lean();
+
+    if (!credit) {
+      return res.status(404).json({ success: false, message: 'Negative credit not found' });
+    }
+
+    if (credit.type !== 'negative') {
+      return res.status(400).json({ success: false, message: 'Credit is not negative' });
+    }
+
+    return res.json({ success: true, data: credit });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/**
+ * ADMIN: Get faculty (id and basic info) by negative credit id
+ * GET /api/v1/admin/credits/negative/:id/faculty
+ */
+async function adminGetFacultyByNegativeCreditId(req, res, next) {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid credit id' });
+    }
+
+    const credit = await Credit.findById(id).select('faculty facultySnapshot type').lean();
+    if (!credit) {
+      return res.status(404).json({ success: false, message: 'Negative credit not found' });
+    }
+
+    if (credit.type && credit.type !== 'negative') {
+      return res.status(400).json({ success: false, message: 'Not a negative credit' });
+    }
+
+    // Try to return faculty snapshot first; fall back to User document lookup if needed
+    let facultyInfo = credit.facultySnapshot || null;
+    if (!facultyInfo || !facultyInfo.name) {
+      if (credit.faculty && mongoose.isValidObjectId(credit.faculty)) {
+        const user = await User.findById(credit.faculty).select('name facultyID email college department').lean();
+        facultyInfo = user || null;
+      }
+    }
+
+    return res.json({ success: true, data: { facultyId: credit.faculty, faculty: facultyInfo } });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+
+
+
 module.exports = {
   createCreditTitle,
   listCreditTitles,
@@ -264,5 +409,8 @@ module.exports = {
   updatePositiveCreditStatus,
   getPositiveCreditById,
   issueNegativeCredit,
-  listNegativeCreditsForFaculty
+  listNegativeCreditsForFaculty,
+  adminListNegativeCredits,
+  adminGetNegativeCreditById,
+  adminGetFacultyByNegativeCreditId
 };

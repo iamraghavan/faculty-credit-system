@@ -11,7 +11,10 @@ const {
   updatePositiveCreditStatus,
   getPositiveCreditById,
   issueNegativeCredit,
-  listNegativeCreditsForFaculty
+  listNegativeCreditsForFaculty,
+  adminListNegativeCredits,
+  adminGetNegativeCreditById,
+  adminGetFacultyByNegativeCreditId
 } = require('../Controllers/adminController');
 
 const { authMiddleware, adminOnly } = require('../Middleware/authMiddleware');
@@ -53,5 +56,14 @@ router.post('/credits/negative', authMiddleware, adminOnly, upload.single('proof
  * Faculty negative credits endpoint (frontend-friendly)
  */
 router.get('/faculty/:facultyId/credits/negative', authMiddleware, listNegativeCreditsForFaculty);
+
+// GET /api/v1/admin/credits/negative
+router.get('/credits/negative', adminListNegativeCredits);
+
+// GET /api/v1/admin/credits/negative/:id
+router.get('/credits/negative/:id', adminGetNegativeCreditById);
+
+// GET /api/v1/admin/credits/negative/:id/faculty
+router.get('/credits/negative/:id/faculty', adminGetFacultyByNegativeCreditId);
 
 module.exports = router;
