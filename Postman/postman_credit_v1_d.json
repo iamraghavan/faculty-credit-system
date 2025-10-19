@@ -1,0 +1,255 @@
+{
+  "info": {
+    "name": "Credits API - V1",
+    "description": "Postman collection for Credits API (faculty + admin). Replace environment variables before running requests: {{baseUrl}}, {{jwt}}, {{facultyId}}, {{creditId}}, {{creditTitleId}}",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "5b8f9e7a-credits-collection-0001"
+  },
+  "item": [
+    {
+      "name": "Faculty - Submit Positive Credit",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}", "type": "text" }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "title",
+              "value": "Published Research Paper",
+              "type": "text"
+            },
+            { "key": "points", "value": "5", "type": "text" },
+            { "key": "academicYear", "value": "2024-2025", "type": "text" },
+            { "key": "categories", "value": "", "type": "text" },
+            { "key": "notes", "value": "Indexed journal", "type": "text" },
+            { "key": "proof", "type": "file", "src": "/path/to/proof.pdf" }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/credits/positive",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "credits", "positive"]
+        }
+      }
+    },
+    {
+      "name": "Faculty - Appeal Negative Credit",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}", "type": "text" },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"reason\": \"I have evidence that this did not occur\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/credits/{{creditId}}/appeal",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "credits", "{{creditId}}", "appeal"]
+        }
+      }
+    },
+    {
+      "name": "Faculty - List Credits (faculty)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}", "type": "text" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/credits/faculty/{{facultyId}}?page=1&limit=20",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "credits", "faculty", "{{facultyId}}"],
+          "query": [
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "20" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Admin - Create Credit Title",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}", "type": "text" },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Late Submission\",\n  \"points\": 2,\n  \"type\": \"negative\",\n  \"description\": \"Penalty for late submission\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/credit-title",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "credit-title"]
+        }
+      }
+    },
+    {
+      "name": "Admin - List Credit Titles",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}", "type": "text" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/credit-title",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "credit-title"]
+        }
+      }
+    },
+    {
+      "name": "Admin - Update Credit Title",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}", "type": "text" },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Late Submission (updated)\",\n  \"points\": 3,\n  \"description\": \"Updated penalty\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/credit-title/{{creditTitleId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "credit-title", "{{creditTitleId}}"]
+        }
+      }
+    },
+    {
+      "name": "Admin - Delete (soft) Credit Title",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}", "type": "text" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/credit-title/{{creditTitleId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "credit-title", "{{creditTitleId}}"]
+        }
+      }
+    },
+    {
+      "name": "Admin - Issue Negative Credit (to faculty)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}", "type": "text" }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "facultyId", "value": "{{facultyId}}", "type": "text" },
+            {
+              "key": "creditTitleId",
+              "value": "{{creditTitleId}}",
+              "type": "text"
+            },
+            { "key": "academicYear", "value": "2024-2025", "type": "text" },
+            { "key": "notes", "value": "Missed deadline", "type": "text" },
+            { "key": "proof", "type": "file", "src": "/path/to/proof.jpg" }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/credits/negative",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "credits", "negative"]
+        }
+      }
+    },
+    {
+      "name": "Admin - List Positive Credits (filterable)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}", "type": "text" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/credits/positive?page=1&limit=20&status=pending,approved",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "credits", "positive"],
+          "query": [
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "20" },
+            { "key": "status", "value": "pending,approved" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Admin - Get Single Positive Credit",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}", "type": "text" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/credits/positive/{{creditId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "credits", "positive", "{{creditId}}"]
+        }
+      }
+    },
+    {
+      "name": "Admin - Update Positive Credit Status",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}", "type": "text" },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"status\": \"approved\",\n  \"notes\": \"Approved by admin\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/credits/positive/{{creditId}}/status",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "credits", "positive", "{{creditId}}", "status"]
+        }
+      }
+    },
+    {
+      "name": "Admin - List Negative Credits For Faculty (frontend-friendly)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}", "type": "text" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/admin/faculty/{{facultyId}}/credits/negative?page=1&limit=20",
+          "host": ["{{baseUrl}}"],
+          "path": [
+            "api",
+            "v1",
+            "admin",
+            "faculty",
+            "{{facultyId}}",
+            "credits",
+            "negative"
+          ],
+          "query": [
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "20" }
+          ]
+        }
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "https://your.api.host" },
+    { "key": "jwt", "value": "" },
+    { "key": "facultyId", "value": "" },
+    { "key": "creditId", "value": "" },
+    { "key": "creditTitleId", "value": "" }
+  ]
+}
