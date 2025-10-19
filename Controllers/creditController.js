@@ -186,33 +186,46 @@ async function appealNegativeCredit(req, res, next) {
  * GET /api/v1/credits/faculty/:facultyId?academicYear=2024-2025&status=Approved&page=1&limit=20
  */
 async function listCreditsForFaculty(req, res, next) {
-  try {
+ try {
     const { facultyId } = req.params;
     const { page = 1, limit = 20, academicYear, status } = req.query;
+
+    // Validate facultyId
+    if (!facultyId) return res.status(400).json({ success: false, message: 'Missing facultyId' });
 
     // Base filter
     const filter = { faculty: facultyId };
 
-    // Filter by academic year (if provided)
-    if (academicYear && academicYear !== 'All') {
-      filter.academicYear = academicYear;
+    // Filter by academic year (if provided and not "All")
+    if (academicYear && String(academicYear).trim().toLowerCase() !== 'all') {
+      filter.academicYear = String(academicYear).trim();
     }
 
     // Filter by status (if provided and not "All")
-    if (status && status !== 'All') {
-      // Normalize first letter uppercase to match DB field
-      const normalizedStatus = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
-      filter.status = normalizedStatus; // e.g. "Pending", "Approved", "Rejected"
+    if (status && String(status).trim().toLowerCase() !== 'all') {
+      // Accept common user-friendly values (case-insensitive)
+      const allowed = ['pending', 'approved', 'rejected', 'appealed']; // expand if needed
+      const statusNorm = String(status).trim().toLowerCase();
+
+      if (!allowed.includes(statusNorm)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid status filter. Allowed values: ${['All', ...allowed.map(s => s.charAt(0).toUpperCase() + s.slice(1))].join(', ')}`
+        });
+      }
+
+      // Store lowercase status (matches DB stored values like "approved")
+      filter.status = statusNorm;
     }
 
-    const skip = (Number(page) - 1) * Number(limit);
+    const skip = (Math.max(Number(page), 1) - 1) * Math.max(Number(limit), 1);
 
     const [total, items] = await Promise.all([
       Credit.countDocuments(filter),
       Credit.find(filter)
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(Number(limit))
+        .limit(Math.max(Number(limit), 1))
         .populate('faculty', 'name facultyID department') // optional populate
         .lean(),
     ]);
