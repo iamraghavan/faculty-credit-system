@@ -167,3 +167,65 @@ exports.listConversations = async (req, res, next) => {
     next(err);
   }
 };
+
+
+/**
+ * Send a message via REST
+ * POST /api/conversations/:conversationId/messages
+ * Body: { text: string, type?: string, meta?: object }
+ */
+exports.sendMessageREST = async (req, res, next) => {
+  try {
+    const { conversationId } = req.params;
+    const { text, type = 'system', meta = {} } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+      return res.status(400).json({ error: 'Invalid conversationId' });
+    }
+
+    if (!text || typeof text !== 'string') {
+      return res.status(400).json({ error: 'Missing text' });
+    }
+
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // Build message object
+    const message = {
+      sender: req.user._id,
+      senderSnapshot: {
+        name: req.user.name,
+        facultyID: req.user.facultyID,
+        college: req.user.college,
+        department: req.user.department,
+      },
+      type,
+      content: { text, meta },
+      createdAt: new Date(),
+    };
+
+    // Append to conversation
+    const updatedConvo = await Conversation.appendMessage(conversationId, message);
+
+    // Prepare response payload
+    const out = {
+      ...message,
+      conversationId,
+      totalMessages: updatedConvo.totalMessages,
+      lastMessage: updatedConvo.lastMessage,
+    };
+
+    // Emit to socket clients
+    const io = req.app?.locals?.io;
+    if (io) {
+      io.to('convo:' + conversationId).emit('message:new', out);
+    }
+
+    // Return success response
+    res.status(201).json({ ok: true, message: out });
+  } catch (err) {
+    console.error('sendMessageREST error', err);
+    next(err);
+  }
+};

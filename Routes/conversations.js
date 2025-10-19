@@ -36,4 +36,9 @@ router.get('/:id/messages', authMiddleware,conversationController.getMessages);
  */
 router.get('/', authMiddleware,conversationController.listConversations);
 
+
+// POST send message (also works together with socket clients)
+router.post('/:conversationId/messages', authMiddleware, sendMessageREST);
+
+
 module.exports = router;
