@@ -176,22 +176,20 @@ exports.listConversations = async (req, res, next) => {
  */
 exports.sendMessageREST = async (req, res, next) => {
   try {
-    const { conversationId } = req.params;
+    const conversationId = req.params.conversationId || req.params.id || req.body.conversationId;
     const { text, type = 'system', meta = {} } = req.body;
 
-    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
-      return res.status(400).json({ error: 'Invalid conversationId' });
-    }
+    if (!conversationId) return res.status(400).json({ error: 'conversationId required' });
+    if (!text || typeof text !== 'string') return res.status(400).json({ error: 'Missing text' });
 
-    if (!text || typeof text !== 'string') {
-      return res.status(400).json({ error: 'Missing text' });
-    }
+    if (!req.user || !req.user._id) return res.status(401).json({ error: 'Unauthorized' });
 
-    if (!req.user || !req.user._id) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+    const convoDoc = await Conversation.findById(conversationId).select('participants').lean();
+    if (!convoDoc) return res.status(404).json({ error: 'Conversation not found' });
 
-    // Build message object
+    const isParticipant = convoDoc.participants.map(String).includes(String(req.user._id));
+    if (!isParticipant && req.user.role !== 'admin') return res.status(403).json({ error: 'Not a participant' });
+
     const message = {
       sender: req.user._id,
       senderSnapshot: {
@@ -205,25 +203,41 @@ exports.sendMessageREST = async (req, res, next) => {
       createdAt: new Date(),
     };
 
-    // Append to conversation
     const updatedConvo = await Conversation.appendMessage(conversationId, message);
 
-    // Prepare response payload
-    const out = {
-      ...message,
-      conversationId,
-      totalMessages: updatedConvo.totalMessages,
-      lastMessage: updatedConvo.lastMessage,
-    };
-
-    // Emit to socket clients
+    // update unreadCounts for recipients not in convo room
     const io = req.app?.locals?.io;
+    const recipients = (updatedConvo.participants || convoDoc.participants || []).map(String).filter(id => id !== String(req.user._id));
+
     if (io) {
-      io.to('convo:' + conversationId).emit('message:new', out);
+      // emit to convo room
+      io.to('convo:' + conversationId).emit('message:new', { ...message, conversationId, totalMessages: updatedConvo.totalMessages, lastMessage: updatedConvo.lastMessage });
+
+      for (const r of recipients) {
+        // Check if any socket of user r is joined in convo room — practical check: see server implementation; here we try to detect via io.sockets
+        let isInRoom = false;
+        const socketsOfUser = []; // collect socket ids for r
+        for (const [sid, sock] of io.sockets.sockets) {
+          if (sock.user && String(sock.user._id) === String(r) && sock.rooms && sock.rooms.has('convo:' + conversationId)) {
+            isInRoom = true;
+            break;
+          }
+        }
+        if (!isInRoom) {
+          const field = `unreadCounts.${r}`;
+          await Conversation.updateOne({ _id: conversationId }, { $inc: { [field]: 1 } }).exec();
+        }
+        // notify via user room (push)
+        io.to(`user:${r}`).emit('notification:creditMessage', {
+          conversationId,
+          snippet: text.slice(0, 180),
+          from: { id: req.user._id, name: req.user.name },
+          createdAt: message.createdAt
+        });
+      }
     }
 
-    // Return success response
-    res.status(201).json({ ok: true, message: out });
+    return res.status(201).json({ ok: true, message, conversationId, totalMessages: updatedConvo.totalMessages });
   } catch (err) {
     console.error('sendMessageREST error', err);
     next(err);
