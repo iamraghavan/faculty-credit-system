@@ -181,28 +181,54 @@ async function appealNegativeCredit(req, res, next) {
   }
 }
 
-/**
- * List credits for faculty (frontend-friendly)
- */
-async function listCreditsForFaculty(req, res, next) {
+exports.listCreditsForFaculty = async (req, res, next) => {
   try {
     const { facultyId } = req.params;
-    const { page = 1, limit = 20, academicYear } = req.query;
+    const { page = 1, limit = 20, academicYear, status } = req.query;
 
+    // Base filter
     const filter = { faculty: facultyId };
-    if (academicYear) filter.academicYear = academicYear;
+
+    // Filter by academic year (if provided)
+    if (academicYear && academicYear !== 'All') {
+      filter.academicYear = academicYear;
+    }
+
+    // Filter by status (if provided and not "All")
+    if (status && status !== 'All') {
+      // Normalize first letter uppercase to match DB field
+      const normalizedStatus = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+      filter.status = normalizedStatus; // e.g. "Pending", "Approved", "Rejected"
+    }
 
     const skip = (Number(page) - 1) * Number(limit);
+
     const [total, items] = await Promise.all([
       Credit.countDocuments(filter),
-      Credit.find(filter).sort({ createdAt: -1 }).skip(skip).limit(Number(limit))
+      Credit.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(Number(limit))
+        .populate('faculty', 'name facultyID department') // optional populate
+        .lean(),
     ]);
 
-    res.json({ success: true, total, page: Number(page), limit: Number(limit), items });
+    res.json({
+      success: true,
+      total,
+      page: Number(page),
+      limit: Number(limit),
+      filters: {
+        academicYear: academicYear || 'All',
+        status: status || 'All',
+      },
+      items,
+    });
   } catch (err) {
+    console.error('listCreditsForFaculty error:', err);
     next(err);
   }
-}
+};
 
 /**
  * Admin creates credit title
