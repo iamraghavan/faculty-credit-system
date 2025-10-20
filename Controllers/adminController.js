@@ -398,6 +398,115 @@ async function adminGetFacultyByNegativeCreditId(req, res, next) {
 }
 
 
+async function adminListNegativeCreditAppeals(req, res, next) {
+  try {
+    const {
+      page = 1,
+      limit = 20,
+      status, // pending, accepted, rejected
+      facultyId,
+      academicYear,
+      sort = '-appeal.createdAt',
+    } = req.query;
+
+    const filter = { type: 'negative', 'appeal.by': { $exists: true } };
+
+    if (status) filter['appeal.status'] = status;
+    if (facultyId && mongoose.isValidObjectId(facultyId)) filter.faculty = facultyId;
+    if (academicYear && academicYear.toLowerCase() !== 'all') filter.academicYear = academicYear;
+
+    const skip = (Math.max(Number(page), 1) - 1) * Math.max(Number(limit), 1);
+
+    const [total, items] = await Promise.all([
+      Credit.countDocuments(filter),
+      Credit.find(filter)
+        .sort(sort)
+        .skip(skip)
+        .limit(Number(limit))
+        .populate('faculty', 'name facultyID email college department')
+        .populate('issuedBy', 'name email role')
+        .populate('appeal.by', 'name facultyID email')
+        .lean()
+    ]);
+
+    return res.json({ success: true, total, page: Number(page), limit: Number(limit), items });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Admin: Get a single appeal by negative credit ID
+ * GET /api/v1/admin/credits/negative/:creditId/appeal
+ */
+async function adminGetAppealByCreditId(req, res, next) {
+  try {
+    const { creditId } = req.params;
+    if (!mongoose.isValidObjectId(creditId)) return res.status(400).json({ success: false, message: 'Invalid creditId' });
+
+    const credit = await Credit.findById(creditId)
+      .populate('faculty', 'name facultyID email college department')
+      .populate('issuedBy', 'name email role')
+      .populate('appeal.by', 'name facultyID email')
+      .lean();
+
+    if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
+    if (!credit.appeal || !credit.appeal.by) return res.status(404).json({ success: false, message: 'No appeal found for this credit' });
+
+    return res.json({ success: true, data: credit.appeal });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Admin: Update appeal status
+ * PUT /api/v1/admin/credits/negative/:creditId/appeal
+ * Body: { status: 'accepted' | 'rejected', notes: optional }
+ */
+async function adminUpdateAppealStatus(req, res, next) {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const { creditId } = req.params;
+    const { status, notes } = req.body;
+
+    const allowedStatuses = ['accepted', 'rejected'];
+    if (!allowedStatuses.includes(status)) return res.status(400).json({ success: false, message: `Invalid status. Allowed: ${allowedStatuses.join(', ')}` });
+
+    const credit = await Credit.findById(creditId).session(session);
+    if (!credit) {
+      await session.abortTransaction();
+      return res.status(404).json({ success: false, message: 'Credit not found' });
+    }
+    if (!credit.appeal || !credit.appeal.by) {
+      await session.abortTransaction();
+      return res.status(400).json({ success: false, message: 'No appeal found for this credit' });
+    }
+
+    credit.appeal.status = status;
+    credit.notes = notes || credit.notes;
+
+    // Optional: If appeal accepted, mark credit as pending re-review
+    if (status === 'accepted' && credit.status !== 'pending') {
+      credit.status = 'pending';
+    }
+
+    await credit.save({ session });
+    await session.commitTransaction();
+    session.endSession();
+
+    // Emit socket event if needed
+    const io = req.app?.locals?.io;
+    if (io) io.emit('credit:appeal:update', { creditId: credit._id, appeal: credit.appeal });
+
+    return res.json({ success: true, data: credit });
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+    next(err);
+  }
+}
 
 
 module.exports = {
@@ -412,5 +521,8 @@ module.exports = {
   listNegativeCreditsForFaculty,
   adminListNegativeCredits,
   adminGetNegativeCreditById,
-  adminGetFacultyByNegativeCreditId
+  adminGetFacultyByNegativeCreditId,
+  adminListNegativeCreditAppeals,
+  adminGetAppealByCreditId,
+  adminUpdateAppealStatus
 };
