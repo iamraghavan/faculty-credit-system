@@ -9,6 +9,7 @@ const {
   listCreditTitles,
   createCreditTitle,
   getNegativeCredits,
+  getNegativeCreditsByFacultyId,
 } = require('../Controllers/creditController');
 
 const { authMiddleware, adminOnly } = require('../Middleware/authMiddleware');
@@ -47,6 +48,12 @@ router.get('/credits/negative', authMiddleware, getNegativeCredits);
 
 // Faculty: appeal a negative credit (once only)
 router.post('/credits/:creditId/appeal', authMiddleware, upload.single('proof'), appealNegativeCredit);
+
+router.get(
+  '/credits/faculty/:facultyId/negative',
+  authMiddleware,
+  getNegativeCreditsByFacultyId
+);
 
 
 
