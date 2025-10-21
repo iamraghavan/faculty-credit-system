@@ -7,7 +7,8 @@ const {
   listCreditsForFaculty,
   adminIssueNegativeCredit,
   listCreditTitles,
-  createCreditTitle
+  createCreditTitle,
+  getNegativeCredits,
 } = require('../Controllers/creditController');
 
 const { authMiddleware, adminOnly } = require('../Middleware/authMiddleware');
@@ -31,7 +32,6 @@ const upload = multer({
  * Faculty routes
  */
 router.post('/credits/positive', authMiddleware, upload.single('proof'), submitPositiveCredit);
-router.post('/credits/:creditId/appeal', authMiddleware, appealNegativeCredit);
 router.get('/credits/faculty/:facultyId', authMiddleware, listCreditsForFaculty);
 
 /**
@@ -40,5 +40,14 @@ router.get('/credits/faculty/:facultyId', authMiddleware, listCreditsForFaculty)
 router.post('/credit-title', authMiddleware, adminOnly, createCreditTitle);
 router.get('/credit-title', authMiddleware, listCreditTitles);
 router.post('/credits/negative', authMiddleware, adminOnly, upload.single('proof'), adminIssueNegativeCredit);
+
+
+// Faculty: get all negative credits (with filters)
+router.get('/credits/negative', authMiddleware, getNegativeCredits);
+
+// Faculty: appeal a negative credit (once only)
+router.post('/credits/:creditId/appeal', authMiddleware, upload.single('proof'), appealNegativeCredit);
+
+
 
 module.exports = router;

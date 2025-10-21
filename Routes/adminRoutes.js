@@ -17,7 +17,8 @@ const {
   adminGetFacultyByNegativeCreditId,
     adminListNegativeCreditAppeals,
   adminGetAppealByCreditId,
-  adminUpdateAppealStatus
+  adminUpdateAppealStatus,
+  getNegativeAppeals
 } = require('../Controllers/adminController');
 
 const { authMiddleware, adminOnly } = require('../Middleware/authMiddleware');
@@ -69,13 +70,19 @@ router.get('/credits/negative/:id', adminGetNegativeCreditById);
 // GET /api/v1/admin/credits/negative/:id/faculty
 router.get('/credits/negative/:id/faculty', adminGetFacultyByNegativeCreditId);
 
-// List all negative credit appeals
-router.get('/credits/negative/appeals', authMiddleware, adminOnly, adminListNegativeCreditAppeals);
+
+
+router.get('/credits/negative/appeals/all', getNegativeAppeals);
+
 
 // Get appeal details by creditId
 router.get('/credits/negative/:creditId/appeal', authMiddleware, adminOnly, adminGetAppealByCreditId);
 
 // Update appeal status (accept/reject)
 router.put('/credits/negative/:creditId/appeal', authMiddleware, adminOnly, adminUpdateAppealStatus);
+
+// Admin: list all negative appeals
+router.get('/credits/negative/appeals', authMiddleware, adminOnly, adminListNegativeCreditAppeals);
+
 
 module.exports = router;

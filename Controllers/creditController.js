@@ -154,98 +154,72 @@ async function adminIssueNegativeCredit(req, res, next) {
   }
 }
 
-/**
- * Faculty appeals negative credit
- */
-async function appealNegativeCredit(req, res, next) {
+ 
+  /**
+   * List credits for faculty (frontend-friendly)
+   * GET /api/v1/credits/faculty/:facultyId?academicYear=2024-2025&status=Approved&page=1&limit=20
+   */
+  async function listCreditsForFaculty(req, res, next) {
   try {
-    const actor = req.user;
-    const { creditId, reason } = req.body;
+      const { facultyId } = req.params;
+      const { page = 1, limit = 20, academicYear, status } = req.query;
 
-    if (!reason) return res.status(400).json({ success: false, message: 'Appeal reason required' });
+      // Validate facultyId
+      if (!facultyId) return res.status(400).json({ success: false, message: 'Missing facultyId' });
 
-    const credit = await Credit.findById(creditId);
-    if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
-    if (credit.type !== 'negative') return res.status(400).json({ success: false, message: 'Only negative credits can be appealed' });
-    if (String(credit.faculty) !== String(actor._id) && actor.role !== 'admin') return res.status(403).json({ success: false, message: 'Unauthorized' });
+      // Base filter
+      const filter = { faculty: facultyId };
 
-    credit.appeal = { by: actor._id, reason, createdAt: new Date(), status: 'pending' };
-    credit.status = 'appealed';
-    await credit.save();
-
-    io.emit(`admin:appealNotification`, credit);
-
-    res.json({ success: true, data: credit });
-  } catch (err) {
-    next(err);
-  }
-}
-
-/**
- * List credits for faculty (frontend-friendly)
- * GET /api/v1/credits/faculty/:facultyId?academicYear=2024-2025&status=Approved&page=1&limit=20
- */
-async function listCreditsForFaculty(req, res, next) {
- try {
-    const { facultyId } = req.params;
-    const { page = 1, limit = 20, academicYear, status } = req.query;
-
-    // Validate facultyId
-    if (!facultyId) return res.status(400).json({ success: false, message: 'Missing facultyId' });
-
-    // Base filter
-    const filter = { faculty: facultyId };
-
-    // Filter by academic year (if provided and not "All")
-    if (academicYear && String(academicYear).trim().toLowerCase() !== 'all') {
-      filter.academicYear = String(academicYear).trim();
-    }
-
-    // Filter by status (if provided and not "All")
-    if (status && String(status).trim().toLowerCase() !== 'all') {
-      // Accept common user-friendly values (case-insensitive)
-      const allowed = ['pending', 'approved', 'rejected', 'appealed']; // expand if needed
-      const statusNorm = String(status).trim().toLowerCase();
-
-      if (!allowed.includes(statusNorm)) {
-        return res.status(400).json({
-          success: false,
-          message: `Invalid status filter. Allowed values: ${['All', ...allowed.map(s => s.charAt(0).toUpperCase() + s.slice(1))].join(', ')}`
-        });
+      // Filter by academic year (if provided and not "All")
+      if (academicYear && String(academicYear).trim().toLowerCase() !== 'all') {
+        filter.academicYear = String(academicYear).trim();
       }
 
-      // Store lowercase status (matches DB stored values like "approved")
-      filter.status = statusNorm;
+      // Filter by status (if provided and not "All")
+      if (status && String(status).trim().toLowerCase() !== 'all') {
+        // Accept common user-friendly values (case-insensitive)
+        const allowed = ['pending', 'approved', 'rejected', 'appealed']; // expand if needed
+        const statusNorm = String(status).trim().toLowerCase();
+
+        if (!allowed.includes(statusNorm)) {
+          return res.status(400).json({
+            success: false,
+            message: `Invalid status filter. Allowed values: ${['All', ...allowed.map(s => s.charAt(0).toUpperCase() + s.slice(1))].join(', ')}`
+          });
+        }
+
+        // Store lowercase status (matches DB stored values like "approved")
+        filter.status = statusNorm;
+      }
+
+      const skip = (Math.max(Number(page), 1) - 1) * Math.max(Number(limit), 1);
+
+      const [total, items] = await Promise.all([
+        Credit.countDocuments(filter),
+        Credit.find(filter)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(Math.max(Number(limit), 1))
+          .populate('faculty', 'name facultyID department') // optional populate
+          .lean(),
+      ]);
+
+      res.json({
+        success: true,
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        filters: {
+          academicYear: academicYear || 'All',
+          status: status || 'All',
+        },
+        items,
+      });
+    } catch (err) {
+      console.error('listCreditsForFaculty error:', err);
+      next(err);
     }
-
-    const skip = (Math.max(Number(page), 1) - 1) * Math.max(Number(limit), 1);
-
-    const [total, items] = await Promise.all([
-      Credit.countDocuments(filter),
-      Credit.find(filter)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(Math.max(Number(limit), 1))
-        .populate('faculty', 'name facultyID department') // optional populate
-        .lean(),
-    ]);
-
-    res.json({
-      success: true,
-      total,
-      page: Number(page),
-      limit: Number(limit),
-      filters: {
-        academicYear: academicYear || 'All',
-        status: status || 'All',
-      },
-      items,
-    });
-  } catch (err) {
-    console.error('listCreditsForFaculty error:', err);
-    next(err);
-  }
-};
+  };
 
 
 /**
@@ -272,11 +246,115 @@ async function listCreditTitles(req, res, next) {
   } catch (err) { next(err); }
 }
 
+
+/**
+ * Get all negative credits for a faculty with filters
+ */
+async function getNegativeCredits(req, res, next) {
+  try {
+    const faculty = req.user;
+    if (!faculty || faculty.role !== 'faculty')
+      return res.status(403).json({ success: false, message: 'Forbidden' });
+
+    const { page = 1, limit = 20, status, academicYear, sort = '-createdAt' } = req.query;
+
+    const filter = { faculty: faculty._id, type: 'negative' };
+
+    if (status && status.toLowerCase() !== 'all')
+      filter.status = status.toLowerCase();
+
+    if (academicYear && academicYear.toLowerCase() !== 'all')
+      filter.academicYear = academicYear;
+
+    const skip = (Math.max(Number(page), 1) - 1) * Math.max(Number(limit), 1);
+
+    const [total, items] = await Promise.all([
+      Credit.countDocuments(filter),
+      Credit.find(filter)
+        .sort(sort)
+        .skip(skip)
+        .limit(Number(limit))
+        .populate('issuedBy', 'name email role')
+        .populate('appeal.by', 'name email facultyID')
+        .lean(),
+    ]);
+
+    res.json({
+      success: true,
+      total,
+      page: Number(page),
+      limit: Number(limit),
+      filters: { academicYear: academicYear || 'All', status: status || 'All' },
+      items,
+    });
+  } catch (err) {
+    console.error('getNegativeCredits error:', err);
+    next(err);
+  }
+}
+
+async function appealNegativeCredit(req, res, next) {
+  try {
+    const faculty = req.user;
+    const { creditId, reason } = req.body;
+
+    if (!reason || !reason.trim())
+      return res.status(400).json({ success: false, message: 'Appeal reason required' });
+
+    const credit = await Credit.findById(creditId);
+    if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
+
+    if (credit.type !== 'negative')
+      return res.status(400).json({ success: false, message: 'Only negative credits can be appealed' });
+
+    if (String(credit.faculty) !== String(faculty._id))
+      return res.status(403).json({ success: false, message: 'Unauthorized' });
+
+    if (credit.appeal?.by)
+      return res.status(400).json({ success: false, message: 'Appeal already submitted' });
+
+    let proofUrl, proofMeta;
+    if (req.file) {
+      const tmpPath = req.file.path;
+      const destPath = `appeals/${creditId}/${Date.now()}_${req.file.originalname}`;
+      try {
+        proofUrl = await uploadFileToGitHub(tmpPath, destPath);
+        fs.unlinkSync(tmpPath);
+      } catch {
+        proofUrl = `/uploads/${path.basename(tmpPath)}`;
+      }
+      proofMeta = {
+        originalName: req.file.originalname,
+        size: req.file.size,
+        mimeType: req.file.mimetype,
+      };
+    }
+
+    credit.appeal = {
+      by: faculty._id,
+      reason,
+      proofUrl,
+      proofMeta,
+      createdAt: new Date(),
+      status: 'pending',
+    };
+    credit.status = 'appealed';
+    await credit.save();
+
+    res.json({ success: true, message: 'Appeal submitted successfully', data: credit });
+  } catch (err) {
+    console.error('appealNegativeCredit error:', err);
+    next(err);
+  }
+}
+
 module.exports = {
   submitPositiveCredit,
   appealNegativeCredit,
   listCreditsForFaculty,
   adminIssueNegativeCredit,
   createCreditTitle,
-  listCreditTitles
+  listCreditTitles,
+  getNegativeCredits,
+  
 };

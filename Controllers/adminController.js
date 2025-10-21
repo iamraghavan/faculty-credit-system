@@ -397,20 +397,11 @@ async function adminGetFacultyByNegativeCreditId(req, res, next) {
   }
 }
 
-
 async function adminListNegativeCreditAppeals(req, res, next) {
   try {
-    const {
-      page = 1,
-      limit = 20,
-      status, // pending, accepted, rejected
-      facultyId,
-      academicYear,
-      sort = '-appeal.createdAt',
-    } = req.query;
+    const { page = 1, limit = 20, status, facultyId, academicYear, sort = '-appeal.createdAt' } = req.query;
 
     const filter = { type: 'negative', 'appeal.by': { $exists: true } };
-
     if (status) filter['appeal.status'] = status;
     if (facultyId && mongoose.isValidObjectId(facultyId)) filter.faculty = facultyId;
     if (academicYear && academicYear.toLowerCase() !== 'all') filter.academicYear = academicYear;
@@ -426,14 +417,38 @@ async function adminListNegativeCreditAppeals(req, res, next) {
         .populate('faculty', 'name facultyID email college department')
         .populate('issuedBy', 'name email role')
         .populate('appeal.by', 'name facultyID email')
-        .lean()
+        .lean(),
     ]);
 
-    return res.json({ success: true, total, page: Number(page), limit: Number(limit), items });
+    res.json({ success: true, total, page: Number(page), limit: Number(limit), items });
   } catch (err) {
+    console.error('adminListNegativeCreditAppeals error:', err);
     next(err);
   }
 }
+
+
+async function getNegativeAppeals(req, res) {
+  try {
+    // Fetch all credits where the type is 'negative' and appeal status is 'pending', 'accepted', or 'rejected'
+    const negativeAppeals = await Credit.find({
+      type: 'negative',
+      'appeal.status': { $in: ['pending', 'accepted', 'rejected'] }
+    }).populate('faculty', 'name college department') // Populating faculty info to show relevant details
+      .populate('appeal.by', 'name email') // Populating appeal's user info
+      .select('faculty title points categories proofUrl appeal status createdAt');
+
+    if (negativeAppeals.length === 0) {
+      return res.status(404).json({ message: 'No negative appeals found' });
+    }
+
+    return res.status(200).json({ negativeAppeals });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Server error', error: err.message });
+  }
+}
+
 
 /**
  * Admin: Get a single appeal by negative credit ID
@@ -509,6 +524,7 @@ async function adminUpdateAppealStatus(req, res, next) {
 }
 
 
+
 module.exports = {
   createCreditTitle,
   listCreditTitles,
@@ -524,5 +540,6 @@ module.exports = {
   adminGetFacultyByNegativeCreditId,
   adminListNegativeCreditAppeals,
   adminGetAppealByCreditId,
-  adminUpdateAppealStatus
+  adminUpdateAppealStatus,
+  getNegativeAppeals
 };
