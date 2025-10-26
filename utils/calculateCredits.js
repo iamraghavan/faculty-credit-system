@@ -3,16 +3,16 @@ const Credit = require('../Models/Credit');
 const User = require('../Models/User');
 
 /**
- * Calculate faculty credits based on all approved credits and appeal rules
+ * Recalculate faculty credits
  * Updates User.currentCredit and User.creditsByYear
  * 
  * Rules:
  * - Positive credit: only include if status === 'approved'
  * - Negative credit: include if status === 'approved'
  *      - If negative credit has appeal:
- *          - appeal.status === 'pending' -> don't include
- *          - appeal.status === 'accepted' -> don't include (appeal accepted -> ignore negative points)
- *          - appeal.status === 'rejected' -> include negative points
+ *          - appeal.status === 'pending' -> skip
+ *          - appeal.status === 'accepted' -> skip
+ *          - appeal.status === 'rejected' -> deduct
  */
 async function recalcFacultyCredits(facultyId) {
   if (!facultyId) throw new Error('Faculty ID is required');
@@ -23,38 +23,38 @@ async function recalcFacultyCredits(facultyId) {
   const credits = await Credit.find({ faculty: facultyId }).lean();
 
   const creditsByYear = {};
-
   let total = 0;
 
   for (const credit of credits) {
     const year = credit.academicYear || 'unknown';
-
     if (!creditsByYear[year]) creditsByYear[year] = 0;
 
     if (credit.type === 'positive') {
+      // Only approved positive credits count
       if (credit.status === 'approved') {
         creditsByYear[year] += credit.points;
         total += credit.points;
       }
     } else if (credit.type === 'negative') {
-      // Check appeal rules
-      let applyNegative = true;
+      let applyNegative = false;
 
       if (credit.appeal) {
-        if (credit.appeal.status === 'pending') applyNegative = false;
-        if (credit.appeal.status === 'accepted') applyNegative = false;
+        // Negative credit with appeal: deduct only if appeal rejected
         if (credit.appeal.status === 'rejected') applyNegative = true;
-      } else if (credit.status !== 'approved') {
-        applyNegative = false;
+      } else {
+        // Negative credit without appeal: deduct if status is approved or rejected
+        if (credit.status === 'approved' || credit.status === 'rejected') applyNegative = true;
       }
 
       if (applyNegative) {
-        creditsByYear[year] -= Math.abs(credit.points);
-        total -= Math.abs(credit.points);
+        const deduction = Math.abs(credit.points);
+        creditsByYear[year] -= deduction;
+        total -= deduction;
       }
     }
   }
 
+  // Update user document
   user.currentCredit = total;
   user.creditsByYear = creditsByYear;
 
@@ -63,3 +63,15 @@ async function recalcFacultyCredits(facultyId) {
 }
 
 module.exports = { recalcFacultyCredits };
+
+
+
+/*
+
+Positive credits → include only if status is approved
+Negative credits → include only if applicable based on appeal rules:
+No appeal: include if status is approved or rejected (deduct points)
+Appeal exists: include only if appeal.status is rejected
+Do not include if appeal.status is pending or accepted
+
+*/
