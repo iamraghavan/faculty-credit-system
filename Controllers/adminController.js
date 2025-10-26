@@ -5,6 +5,8 @@ const User = require('../Models/User');
 const fs = require('fs');
 const path = require('path');
 
+const { recalcFacultyCredits } = require('../utils/calculateCredits');
+
 /**
  * Helper to emit via socket
  */
@@ -192,52 +194,60 @@ async function updatePositiveCreditStatus(req, res, next) {
     const allowed = ['pending', 'approved', 'rejected', 'appealed'];
     if (!allowed.includes(status)) {
       await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({ success: false, message: 'Invalid status' });
     }
 
     const credit = await Credit.findById(id).session(session);
     if (!credit) {
       await session.abortTransaction();
+      session.endSession();
       return res.status(404).json({ success: false, message: 'Credit not found' });
     }
 
     if (credit.type !== 'positive') {
       await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({ success: false, message: 'Not a positive credit' });
     }
 
+    // Load faculty inside transaction to ensure it exists (we won't update it here)
     const faculty = await User.findById(credit.faculty).session(session);
     if (!faculty) {
       await session.abortTransaction();
+      session.endSession();
       return res.status(404).json({ success: false, message: 'Faculty not found' });
     }
 
     const prevStatus = credit.status;
-    const points = Number(credit.points) || 0;
 
-    if (status === 'approved' && prevStatus !== 'approved') {
-      faculty.currentCredit = (faculty.currentCredit || 0) + points;
-      faculty.creditsByYear = { ...faculty.creditsByYear, [credit.academicYear]: ((faculty.creditsByYear?.[credit.academicYear] || 0) + points) };
-    }
-
-    if (prevStatus === 'approved' && status !== 'approved') {
-      faculty.currentCredit = (faculty.currentCredit || 0) - points;
-      faculty.creditsByYear = { ...faculty.creditsByYear, [credit.academicYear]: ((faculty.creditsByYear?.[credit.academicYear] || 0) - points) };
-    }
-
+    // Only update credit document inside the transaction
     credit.status = status;
-    if (notes) credit.notes = notes;
+    if (typeof notes !== 'undefined') credit.notes = notes;
 
-    await Promise.all([credit.save({ session }), faculty.save({ session })]);
+    await credit.save({ session });
 
+    // commit transaction: the credit status change is now durable
     await session.commitTransaction();
     session.endSession();
 
+    // Recalculate faculty totals after the credit status change.
+    // recalcFacultyCredits reads Credit collection and writes User doc.
+    // It is executed outside the transaction (so it sees committed changes).
+    try {
+      await recalcFacultyCredits(faculty._id);
+    } catch (recalcErr) {
+      // Log the error but continue — credit status has been changed; totals can be retried.
+      console.error('recalcFacultyCredits failed:', recalcErr);
+    }
+
+    // Emit socket update (ensure emitSocket or io is available in this module)
     emitSocket(req, 'credit:positive:update', { credit });
 
-    res.json({ success: true, data: credit });
+    return res.json({ success: true, data: credit });
   } catch (err) {
-    await session.abortTransaction();
+    // Ensure transaction is aborted on error
+    try { await session.abortTransaction(); } catch (e) { /* ignore */ }
     session.endSession();
     next(err);
   }
