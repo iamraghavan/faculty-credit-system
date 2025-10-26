@@ -22,10 +22,10 @@ router.put('/me', authMiddleware, upload.single('profileImage'), updateProfile);
 /**
  * Admin routes
  */
-router.post('/', authMiddleware, adminOnly, adminCreateUser);
-router.get('/', authMiddleware, adminOnly, listUsers);
-router.get('/:id', authMiddleware, adminOnly, getUserById);
-router.put('/:id', authMiddleware, adminOnly, upload.single('profileImage'), adminUpdateUser);
-router.delete('/:id', authMiddleware, adminOnly, deleteUser);
+router.post('/', authMiddleware, adminCreateUser);
+router.get('/', authMiddleware, listUsers);
+router.get('/:id', authMiddleware, getUserById);
+router.put('/:id', authMiddleware, upload.single('profileImage'), adminUpdateUser);
+router.delete('/:id', authMiddleware, deleteUser);
 
 module.exports = router;
