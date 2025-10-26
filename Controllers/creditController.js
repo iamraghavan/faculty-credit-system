@@ -9,89 +9,100 @@
   const io = require('../socket'); // import socket instance
 
   /**
-   * Helper: handle file upload and return proofUrl & proofMeta
-   */
-  async function handleFileUpload(file, academicYear) {
-    if (!file) return {};
+ * Helper: handle GitHub file upload and return proofUrl & proofMeta
+ */
+async function handleFileUpload(file, folder) {
+  if (!file) return {};
 
-    const tmpPath = file.path;
-    const destPath = `assets/${academicYear}/${Date.now()}_${file.originalname}`;
-    let proofUrl;
+  const tmpPath = file.path;
+  const originalName = file.originalname || 'upload';
+  const safeName = path.basename(originalName).replace(/[^\w.\-() ]+/g, '_').slice(0, 200);
+  const destPath = `${folder}/${Date.now()}_${safeName}`;
 
-    if (process.env.GITHUB_TOKEN && process.env.ASSET_GH_REPO && process.env.ASSET_GH_OWNER) {
-      try { proofUrl = await uploadFileToGitHub(tmpPath, destPath); } 
-      catch { proofUrl = `/uploads/${path.basename(tmpPath)}`; }
-    } else {
-      proofUrl = `/uploads/${path.basename(tmpPath)}`;
-    }
-
-    try { fs.unlinkSync(tmpPath); } catch {}
-
-    return { proofUrl, proofMeta: { originalName: file.originalname, size: file.size, mimeType: file.mimetype } };
+  if (!process.env.GITHUB_TOKEN || !process.env.ASSET_GH_REPO || !process.env.ASSET_GH_OWNER) {
+    throw new Error('GitHub upload not configured. Set ASSET_GH_OWNER, ASSET_GH_REPO, and GITHUB_TOKEN.');
   }
 
-  /**
-   * Faculty submits positive credit
-   */
-  async function submitPositiveCredit(req, res, next) {
-    try {
-      const faculty = req.user;
-      if (!faculty || faculty.role !== 'faculty') return res.status(403).json({ success: false, message: 'Forbidden' });
-
-      let { title, points, categories, academicYear, notes } = req.body;
-      if (!title || !points || !academicYear) return res.status(400).json({ success: false, message: 'Missing required fields' });
-
-      points = Number(points);
-      if (points <= 0 || isNaN(points)) return res.status(400).json({ success: false, message: 'Points must be a positive number' });
-
-      // Validate category IDs
-      let categoryIds = [];
-      if (categories) {
-        if (!Array.isArray(categories)) categories = String(categories).split(',');
-        categoryIds = categories.map(c => c.trim()).filter(Boolean);
-        const validCategories = await CreditTitle.find({ _id: { $in: categoryIds } }).select('_id');
-        const validIds = validCategories.map(c => c._id.toString());
-        const invalidIds = categoryIds.filter(c => !validIds.includes(c));
-        if (invalidIds.length > 0) return res.status(400).json({ success: false, message: 'Invalid category IDs', invalidIds });
-        categoryIds = validCategories.map(c => c._id);
-      }
-
-      const { proofUrl, proofMeta } = await handleFileUpload(req.file, academicYear);
-
-      const creditDoc = await Credit.create({
-        faculty: faculty._id,
-        facultySnapshot: {
-          facultyID: faculty.facultyID,
-          name: faculty.name,
-          college: faculty.college,
-          department: faculty.department,
-        },
-        type: 'positive',
-        title,
-        points,
-        categories: categoryIds,
-        proofUrl,
-        proofMeta,
-        academicYear,
-        issuedBy: faculty._id,
-        status: 'pending',
-        notes: notes || undefined
-      });
-
-      // Update faculty credits
-      faculty.currentCredit = (faculty.currentCredit || 0) + points;
-      faculty.creditsByYear = faculty.creditsByYear || {};
-      faculty.creditsByYear[academicYear] = (faculty.creditsByYear[academicYear] || 0) + points;
-      await faculty.save();
-
-      // Emit socket update
-      io.emit(`faculty:${faculty._id}:creditUpdate`, creditDoc);
-
-      res.status(201).json({ success: true, data: creditDoc });
-    } catch (err) {
-      next(err);
-    }
+  try {
+    const proofUrl = await uploadFileToGitHub(tmpPath, destPath);
+    fs.unlinkSync(tmpPath); // cleanup temp file
+    return {
+      proofUrl,
+      proofMeta: {
+        originalName,
+        size: file.size,
+        mimeType: file.mimetype,
+      },
+    };
+  } catch (err) {
+    fs.unlinkSync(tmpPath);
+    throw new Error('Failed to upload file to GitHub: ' + err.message);
   }
+}
+/**
+ * Faculty submits positive credit
+ */
+async function submitPositiveCredit(req, res, next) {
+  try {
+    const faculty = req.user;
+    if (!faculty || faculty.role !== 'faculty')
+      return res.status(403).json({ success: false, message: 'Forbidden' });
+
+    let { title, points, categories, academicYear, notes } = req.body;
+    if (!title || !points || !academicYear)
+      return res.status(400).json({ success: false, message: 'Missing required fields' });
+
+    points = Number(points);
+    if (points <= 0 || isNaN(points))
+      return res.status(400).json({ success: false, message: 'Points must be a positive number' });
+
+    // Validate categories
+    let categoryIds = [];
+    if (categories) {
+      if (!Array.isArray(categories)) categories = String(categories).split(',');
+      categoryIds = categories.map(c => c.trim()).filter(Boolean);
+      const validCategories = await CreditTitle.find({ _id: { $in: categoryIds } }).select('_id');
+      const validIds = validCategories.map(c => c._id.toString());
+      const invalidIds = categoryIds.filter(c => !validIds.includes(c));
+      if (invalidIds.length > 0)
+        return res.status(400).json({ success: false, message: 'Invalid category IDs', invalidIds });
+      categoryIds = validCategories.map(c => c._id);
+    }
+
+    const { proofUrl, proofMeta } = await handleFileUpload(req.file, `credits/${academicYear}`);
+
+    const creditDoc = await Credit.create({
+      faculty: faculty._id,
+      facultySnapshot: {
+        facultyID: faculty.facultyID,
+        name: faculty.name,
+        college: faculty.college,
+        department: faculty.department,
+      },
+      type: 'positive',
+      title,
+      points,
+      categories: categoryIds,
+      proofUrl,
+      proofMeta,
+      academicYear,
+      issuedBy: faculty._id,
+      status: 'pending',
+      notes: notes || undefined,
+    });
+
+    faculty.currentCredit = (faculty.currentCredit || 0) + points;
+    faculty.creditsByYear = faculty.creditsByYear || {};
+    faculty.creditsByYear[academicYear] = (faculty.creditsByYear[academicYear] || 0) + points;
+    await faculty.save();
+
+    io.emit(`faculty:${faculty._id}:creditUpdate`, creditDoc);
+
+    res.status(201).json({ success: true, data: creditDoc });
+  } catch (err) {
+    next(err);
+  }
+}
 
   /**
    * Admin issues negative credit
@@ -293,69 +304,40 @@
     }
   }
 
+/**
+ * Faculty appeals negative credit
+ */
 async function appealNegativeCredit(req, res, next) {
   try {
     const faculty = req.user;
-    const creditId = req.params.creditId; // from route /credits/:creditId/appeal
+    const creditId = req.params.creditId;
     const reason = (req.body.reason || '').trim();
 
-    if (!reason) {
-      return res.status(400).json({ success: false, message: 'Appeal reason required' });
-    }
+    if (!reason) return res.status(400).json({ success: false, message: 'Appeal reason required' });
 
     const credit = await Credit.findById(creditId);
     if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
 
-    if (credit.type !== 'negative') {
+    if (credit.type !== 'negative')
       return res.status(400).json({ success: false, message: 'Only negative credits can be appealed' });
-    }
 
-    if (String(credit.faculty) !== String(faculty._id)) {
+    if (String(credit.faculty) !== String(faculty._id))
       return res.status(403).json({ success: false, message: 'Unauthorized' });
-    }
 
-    // Prevent submitting if there is already a pending appeal
-    if (credit.appeal && credit.appeal.status === 'pending') {
+    if (credit.appeal && credit.appeal.status === 'pending')
       return res.status(400).json({ success: false, message: 'An appeal is already pending for this credit' });
-    }
 
-    // Track total number of appeals allowed per faculty for this credit (max 2)
     const currentAttempts = credit.appealCount || 0;
-    if (currentAttempts >= 2) {
+    if (currentAttempts >= 2)
       return res.status(400).json({ success: false, message: 'Maximum number of appeals (2) has been reached' });
-    }
 
-    let proofUrl = undefined;
-    let proofMeta = undefined;
-
+    let proofUrl, proofMeta;
     if (req.file) {
-      const tmpPath = req.file.path;
-      const originalName = req.file.originalname || 'upload';
-      // sanitize and reduce filename length to avoid path issues
-      const safeOriginal = path.basename(originalName).replace(/[^\w.\-() ]+/g, '_').slice(0, 200);
-      const destPath = `appeals/${creditId}/${Date.now()}_${safeOriginal}`;
-
-      try {
-        // MUST upload to GitHub; do not fallback to local
-        proofUrl = await uploadFileToGitHub(tmpPath, destPath);
-      } catch (uploadErr) {
-        console.error('GitHub upload failed:', uploadErr);
-        // try to clean temp file, then return error to client
-        try { fs.unlinkSync(tmpPath); } catch (e) { /* ignore */ }
-        return res.status(500).json({ success: false, message: 'Failed to upload proof file. Please try again later.' });
-      }
-
-      // cleanup temp file after successful upload
-      try { fs.unlinkSync(tmpPath); } catch (e) { /* ignore */ }
-
-      proofMeta = {
-        originalName: originalName,
-        size: req.file.size,
-        mimeType: req.file.mimetype,
-      };
+      const uploadResult = await handleFileUpload(req.file, `appeals/${creditId}`);
+      proofUrl = uploadResult.proofUrl;
+      proofMeta = uploadResult.proofMeta;
     }
 
-    // Create new appeal object and increment attempt count
     credit.appeal = {
       by: faculty._id,
       reason,
@@ -369,13 +351,12 @@ async function appealNegativeCredit(req, res, next) {
 
     await credit.save();
 
-    return res.json({ success: true, message: 'Appeal submitted successfully', data: credit });
+    res.json({ success: true, message: 'Appeal submitted successfully', data: credit });
   } catch (err) {
     console.error('appealNegativeCredit error:', err);
     next(err);
   }
 }
-
 
   async function getNegativeCreditsByFacultyId(req, res, next) {
   try {
