@@ -293,13 +293,13 @@
     }
   }
 
- async function appealNegativeCredit(req, res, next) {
+async function appealNegativeCredit(req, res, next) {
   try {
     const faculty = req.user;
     const creditId = req.params.creditId; // from route /credits/:creditId/appeal
-    const reason = req.body.reason;
+    const reason = (req.body.reason || '').trim();
 
-    if (!reason || !reason.trim()) {
+    if (!reason) {
       return res.status(400).json({ success: false, message: 'Appeal reason required' });
     }
 
@@ -320,34 +320,36 @@
     }
 
     // Track total number of appeals allowed per faculty for this credit (max 2)
-    // NOTE: Make sure your schema includes appealCount: { type: Number, default: 0 }
     const currentAttempts = credit.appealCount || 0;
     if (currentAttempts >= 2) {
       return res.status(400).json({ success: false, message: 'Maximum number of appeals (2) has been reached' });
     }
 
-    // Handle file upload (if any)
     let proofUrl = undefined;
     let proofMeta = undefined;
+
     if (req.file) {
       const tmpPath = req.file.path;
-      // sanitize original name, and use creditId + timestamp to avoid collisions
-      const safeName = path.basename(req.file.originalname).replace(/\s+/g, '_');
-      const destPath = `appeals/${creditId}/${Date.now()}_${safeName}`;
+      const originalName = req.file.originalname || 'upload';
+      // sanitize and reduce filename length to avoid path issues
+      const safeOriginal = path.basename(originalName).replace(/[^\w.\-() ]+/g, '_').slice(0, 200);
+      const destPath = `appeals/${creditId}/${Date.now()}_${safeOriginal}`;
 
       try {
+        // MUST upload to GitHub; do not fallback to local
         proofUrl = await uploadFileToGitHub(tmpPath, destPath);
       } catch (uploadErr) {
-        // fallback to local upload path if GitHub upload fails
-        console.error('GitHub upload failed, falling back to local path:', uploadErr?.message || uploadErr);
-        proofUrl = `/uploads/${path.basename(tmpPath)}`;
-      } finally {
-        // Always try to remove temp file (non-blocking)
+        console.error('GitHub upload failed:', uploadErr);
+        // try to clean temp file, then return error to client
         try { fs.unlinkSync(tmpPath); } catch (e) { /* ignore */ }
+        return res.status(500).json({ success: false, message: 'Failed to upload proof file. Please try again later.' });
       }
 
+      // cleanup temp file after successful upload
+      try { fs.unlinkSync(tmpPath); } catch (e) { /* ignore */ }
+
       proofMeta = {
-        originalName: req.file.originalname,
+        originalName: originalName,
         size: req.file.size,
         mimeType: req.file.mimetype,
       };
@@ -356,14 +358,14 @@
     // Create new appeal object and increment attempt count
     credit.appeal = {
       by: faculty._id,
-      reason: reason.trim(),
+      reason,
       proofUrl,
       proofMeta,
       createdAt: new Date(),
       status: 'pending',
     };
     credit.status = 'appealed';
-    credit.appealCount = currentAttempts + 1; // save attempt
+    credit.appealCount = currentAttempts + 1;
 
     await credit.save();
 
@@ -373,6 +375,7 @@
     next(err);
   }
 }
+
 
   async function getNegativeCreditsByFacultyId(req, res, next) {
   try {
