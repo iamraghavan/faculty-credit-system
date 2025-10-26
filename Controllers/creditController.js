@@ -293,61 +293,86 @@
     }
   }
 
-  async function appealNegativeCredit(req, res, next) {
-    try {
-      const faculty = req.user;
-      const { creditId, reason } = req.body;
+ async function appealNegativeCredit(req, res, next) {
+  try {
+    const faculty = req.user;
+    const creditId = req.params.creditId; // from route /credits/:creditId/appeal
+    const reason = req.body.reason;
 
-      if (!reason || !reason.trim())
-        return res.status(400).json({ success: false, message: 'Appeal reason required' });
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ success: false, message: 'Appeal reason required' });
+    }
 
-      const credit = await Credit.findById(creditId);
-      if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
+    const credit = await Credit.findById(creditId);
+    if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
 
-      if (credit.type !== 'negative')
-        return res.status(400).json({ success: false, message: 'Only negative credits can be appealed' });
+    if (credit.type !== 'negative') {
+      return res.status(400).json({ success: false, message: 'Only negative credits can be appealed' });
+    }
 
-      if (String(credit.faculty) !== String(faculty._id))
-        return res.status(403).json({ success: false, message: 'Unauthorized' });
+    if (String(credit.faculty) !== String(faculty._id)) {
+      return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
 
-      if (credit.appeal?.by)
-        return res.status(400).json({ success: false, message: 'Appeal already submitted' });
+    // Prevent submitting if there is already a pending appeal
+    if (credit.appeal && credit.appeal.status === 'pending') {
+      return res.status(400).json({ success: false, message: 'An appeal is already pending for this credit' });
+    }
 
-      let proofUrl, proofMeta;
-      if (req.file) {
-        const tmpPath = req.file.path;
-        const destPath = `appeals/${creditId}/${Date.now()}_${req.file.originalname}`;
-        try {
-          proofUrl = await uploadFileToGitHub(tmpPath, destPath);
-          fs.unlinkSync(tmpPath);
-        } catch {
-          proofUrl = `/uploads/${path.basename(tmpPath)}`;
-        }
-        proofMeta = {
-          originalName: req.file.originalname,
-          size: req.file.size,
-          mimeType: req.file.mimetype,
-        };
+    // Track total number of appeals allowed per faculty for this credit (max 2)
+    // NOTE: Make sure your schema includes appealCount: { type: Number, default: 0 }
+    const currentAttempts = credit.appealCount || 0;
+    if (currentAttempts >= 2) {
+      return res.status(400).json({ success: false, message: 'Maximum number of appeals (2) has been reached' });
+    }
+
+    // Handle file upload (if any)
+    let proofUrl = undefined;
+    let proofMeta = undefined;
+    if (req.file) {
+      const tmpPath = req.file.path;
+      // sanitize original name, and use creditId + timestamp to avoid collisions
+      const safeName = path.basename(req.file.originalname).replace(/\s+/g, '_');
+      const destPath = `appeals/${creditId}/${Date.now()}_${safeName}`;
+
+      try {
+        proofUrl = await uploadFileToGitHub(tmpPath, destPath);
+      } catch (uploadErr) {
+        // fallback to local upload path if GitHub upload fails
+        console.error('GitHub upload failed, falling back to local path:', uploadErr?.message || uploadErr);
+        proofUrl = `/uploads/${path.basename(tmpPath)}`;
+      } finally {
+        // Always try to remove temp file (non-blocking)
+        try { fs.unlinkSync(tmpPath); } catch (e) { /* ignore */ }
       }
 
-      credit.appeal = {
-        by: faculty._id,
-        reason,
-        proofUrl,
-        proofMeta,
-        createdAt: new Date(),
-        status: 'pending',
+      proofMeta = {
+        originalName: req.file.originalname,
+        size: req.file.size,
+        mimeType: req.file.mimetype,
       };
-      credit.status = 'appealed';
-      await credit.save();
-
-      res.json({ success: true, message: 'Appeal submitted successfully', data: credit });
-    } catch (err) {
-      console.error('appealNegativeCredit error:', err);
-      next(err);
     }
-  }
 
+    // Create new appeal object and increment attempt count
+    credit.appeal = {
+      by: faculty._id,
+      reason: reason.trim(),
+      proofUrl,
+      proofMeta,
+      createdAt: new Date(),
+      status: 'pending',
+    };
+    credit.status = 'appealed';
+    credit.appealCount = currentAttempts + 1; // save attempt
+
+    await credit.save();
+
+    return res.json({ success: true, message: 'Appeal submitted successfully', data: credit });
+  } catch (err) {
+    console.error('appealNegativeCredit error:', err);
+    next(err);
+  }
+}
 
   async function getNegativeCreditsByFacultyId(req, res, next) {
   try {
