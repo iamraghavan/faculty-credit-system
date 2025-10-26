@@ -91,9 +91,6 @@ async function submitPositiveCredit(req, res, next) {
       notes: notes || undefined,
     });
 
-    faculty.currentCredit = (faculty.currentCredit || 0) + points;
-    faculty.creditsByYear = faculty.creditsByYear || {};
-    faculty.creditsByYear[academicYear] = (faculty.creditsByYear[academicYear] || 0) + points;
     await faculty.save();
 
     io.emit(`faculty:${faculty._id}:creditUpdate`, creditDoc);
@@ -139,9 +136,7 @@ async function submitPositiveCredit(req, res, next) {
         notes
       }], { session });
 
-      faculty.currentCredit = (faculty.currentCredit || 0) - Math.abs(ct.points);
-      faculty.creditsByYear = faculty.creditsByYear || {};
-      faculty.creditsByYear[academicYear] = (faculty.creditsByYear[academicYear] || 0) - Math.abs(ct.points);
+  
       await faculty.save({ session });
 
       await session.commitTransaction();
