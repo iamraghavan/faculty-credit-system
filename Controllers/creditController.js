@@ -7,7 +7,7 @@
   const { sendEmail } = require('../utils/email');
   const mongoose = require('mongoose');
   const io = require('../socket'); // import socket instance
-
+  const { recalcFacultyCredits } = require('../utils/calculateCredits');
   /**
  * Helper: handle GitHub file upload and return proofUrl & proofMeta
  */
@@ -93,6 +93,8 @@ async function submitPositiveCredit(req, res, next) {
 
     await faculty.save();
 
+    await recalcFacultyCredits(faculty._id);
+
     io.emit(`faculty:${faculty._id}:creditUpdate`, creditDoc);
 
     res.status(201).json({ success: true, data: creditDoc });
@@ -144,6 +146,8 @@ async function submitPositiveCredit(req, res, next) {
 
       // Emit socket update
       io.emit(`faculty:${faculty._id}:creditUpdate`, c[0]);
+
+      await recalcFacultyCredits(faculty._id);
 
       // Email notification (async)
       sendEmail({
