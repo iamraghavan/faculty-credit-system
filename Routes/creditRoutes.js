@@ -10,6 +10,9 @@ const {
   createCreditTitle,
   getNegativeCredits,
   getNegativeCreditsByFacultyId,
+  recalcCreditsController,
+  getFacultyCredits,
+
 } = require('../Controllers/creditController');
 
 const { authMiddleware, adminOnly } = require('../Middleware/authMiddleware');
@@ -55,6 +58,8 @@ router.get(
   getNegativeCreditsByFacultyId
 );
 
+router.post('/credits/:facultyId/recalc-credits', authMiddleware, recalcCreditsController);
+router.get('/:facultyId/credits', getFacultyCredits);
 
 
 module.exports = router;

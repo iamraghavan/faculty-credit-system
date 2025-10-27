@@ -407,6 +407,61 @@ async function appealNegativeCredit(req, res, next) {
   }
 }
 
+
+async function recalcCreditsController(req, res, next) {
+  try {
+    const { facultyId } = req.params; // or req.body.facultyId
+    if (!facultyId) return res.status(400).json({ success: false, message: 'facultyId is required' });
+
+    // ensure user exists
+    const user = await User.findById(facultyId);
+    if (!user) return res.status(404).json({ success: false, message: 'faculty is not found' });
+
+    const result = await recalcFacultyCredits(facultyId);
+
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function getFacultyCredits(req, res, next) {
+  try {
+    const { facultyId } = req.params;
+
+    if (!facultyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'facultyId is required in URL params',
+      });
+    }
+
+   
+    const user = await User.findOne({ facultyID: facultyId })
+      .select('name facultyID currentCredit creditsByYear');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Faculty not found',
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        name: user.name,
+        facultyID: user.facultyID,
+        currentCredit: user.currentCredit || 0,
+        creditsByYear: user.creditsByYear || {},
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+
   module.exports = {
     submitPositiveCredit,
     appealNegativeCredit,
@@ -416,5 +471,7 @@ async function appealNegativeCredit(req, res, next) {
     listCreditTitles,
     getNegativeCredits,
     getNegativeCreditsByFacultyId,
+    recalcCreditsController,
+    getFacultyCredits,
   };
 

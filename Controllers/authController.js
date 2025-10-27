@@ -3,6 +3,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../Models/User');
 const { generateFacultyID, generateApiKey } = require('../utils/generateID');
+const { recalcFacultyCredits } = require('../utils/calculateCredits');
+
 
 /**
  * Register a new user (first user or subsequent users)
@@ -80,23 +82,46 @@ async function login(req, res, next) {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ success: false, message: 'Missing credentials' });
 
+    // get user including password
     const user = await User.findOne({ email }).select('+password');
     if (!user) return res.status(401).json({ success: false, message: 'Invalid credentials' });
 
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(401).json({ success: false, message: 'Invalid credentials' });
 
+    // Recalculate credits before issuing token (ensures currentCredit is up-to-date)
+    try {
+      // Only recalc for faculty role (optional)
+      if (user.role === 'faculty') {
+        // await to ensure DB updated before returning the user payload
+        await recalcFacultyCredits(user._id);
+        // reload user to get latest currentCredit (optional)
+        await user.reload?.() || await user.populate(); // best-effort: if Mongoose has reload
+        // Alternatively re-fetch minimal fields:
+        // const updatedUser = await User.findById(user._id).lean();
+      }
+    } catch (recalcErr) {
+      // don't block login if recalculation fails for some reason — log it and continue.
+      console.error('Credit recalculation failed at login for user', user._id, recalcErr);
+      // Optionally you can return an error instead of continuing — depends on your requirements.
+    }
+
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '1h' });
+
+    // fetch latest user snapshot for response (so client sees updated credits)
+    const freshUser = await User.findById(user._id).lean();
 
     res.json({
       success: true,
       data: {
-        id: user._id,
-        name: user.name,
-        facultyID: user.facultyID,
-        apiKey: user.apiKey,
-        role: user.role,
-        department: user.department,
+        id: freshUser._id,
+        name: freshUser.name,
+        facultyID: freshUser.facultyID,
+        apiKey: freshUser.apiKey,
+        role: freshUser.role,
+        department: freshUser.department,
+        currentCredit: freshUser.currentCredit,
+        creditsByYear: freshUser.creditsByYear,
         token,
       },
     });
