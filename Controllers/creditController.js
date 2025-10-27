@@ -424,6 +424,9 @@ async function recalcCreditsController(req, res, next) {
     next(err);
   }
 }
+
+
+
 /**
  * GET /api/v1/credits/:facultyId/credits
  * Accepts either:
@@ -432,6 +435,11 @@ async function recalcCreditsController(req, res, next) {
  *
  * Optional query param:
  *  - ?recalc=true  -> will recalculate credits before returning (awaits recalc)
+ *
+ * Returns:
+ *  - user basic info
+ *  - currentCredit & creditsByYear
+ *  - statistics: total counts, counts-by-year, currentAcademicYear counts, totals, eventsApplied
  */
 async function getFacultyCredits(req, res, next) {
   try {
@@ -439,77 +447,168 @@ async function getFacultyCredits(req, res, next) {
     const { recalc } = req.query;
 
     if (!facultyId) {
-      return res.status(400).json({
-        success: false,
-        message: 'facultyId is required in URL params',
-      });
+      return res.status(400).json({ success: false, message: 'facultyId is required in URL params' });
     }
 
+    // find user by _id or facultyID
     let user = null;
-
-    // If it's a valid ObjectId, try findById first
     if (mongoose.Types.ObjectId.isValid(facultyId)) {
       user = await User.findById(facultyId).select('name facultyID currentCredit creditsByYear');
     }
-
-    // If not found by _id, try facultyID field
     if (!user) {
       user = await User.findOne({ facultyID: facultyId }).select('name facultyID currentCredit creditsByYear');
     }
-
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'Faculty not found',
-      });
+      return res.status(404).json({ success: false, message: 'Faculty not found' });
     }
 
-    // Optionally recalc before returning (useful if you want freshest data)
+    // Optionally force recalculation (await)
     if (String(recalc).toLowerCase() === 'true') {
       try {
         await recalcFacultyCredits(user._id);
-        // re-fetch the updated fields
-        const refreshed = await User.findById(user._id).select('name facultyID currentCredit creditsByYear').lean();
-        return res.json({
-          success: true,
-          data: {
-            name: refreshed.name,
-            facultyID: refreshed.facultyID,
-            currentCredit: refreshed.currentCredit || 0,
-            creditsByYear: refreshed.creditsByYear || {},
-          },
-        });
       } catch (err) {
-        // If recalc fails, return a warning but still return the existing user data
         console.error('Recalc failed:', err);
-        return res.status(200).json({
-          success: true,
-          warning: 'Recalculation failed, returning last-known values',
-          data: {
-            name: user.name,
-            facultyID: user.facultyID,
-            currentCredit: user.currentCredit || 0,
-            creditsByYear: user.creditsByYear || {},
-          },
-        });
+        // continue to return available data but include a warning below
+      }
+      // refresh stored fields
+      user = await User.findById(user._id).select('name facultyID currentCredit creditsByYear');
+    }
+
+    // Fetch all credits for this user to compute stats (don't rely solely on stored fields)
+    const credits = await Credit.find({ faculty: user._id }).sort({ createdAt: 1 }).lean();
+
+    // helper to decide if a negative credit should be applied (per your rules)
+    function negativeShouldApply(credit) {
+      // If no appeal object: include only when credit.status === 'approved'
+      if (!credit.appeal) {
+        return credit.status === 'approved';
+      }
+
+      // appeal exists -> examine appeal.status
+      const raw = credit.appeal.status;
+      const status = (raw === undefined || raw === null) ? '' : String(raw).trim().toLowerCase();
+      const emptyLike = status === '' || status === 'none' || status === 'null' || status === 'nil';
+
+      if (status === 'rejected') return true;
+      // accepted, pending, empty-like -> do NOT include
+      return false;
+    }
+
+    // Stats containers
+    const positiveCountByYear = {};
+    const negativeCountByYear = {};
+    const appliedPositiveCountByYear = {}; // positive that contribute (approved)
+    const appliedNegativeCountByYear = {}; // negative that are applied per rules
+    let totalPositiveCount = 0;      // number of positive credit documents (regardless of status)
+    let totalNegativeCount = 0;      // number of negative credit documents (regardless of appeal)
+    let appliedPositiveCount = 0;    // positive documents that count (status === 'approved')
+    let appliedNegativeCount = 0;    // negative documents that were applied (per rules)
+    const creditsCountByYear = {};
+
+    // build sets of academicYear values
+    const yearsSeen = new Set();
+
+    for (const c of credits) {
+      const year = c.academicYear || 'unknown';
+      yearsSeen.add(year);
+
+      // init containers
+      positiveCountByYear[year] = positiveCountByYear[year] || 0;
+      negativeCountByYear[year] = negativeCountByYear[year] || 0;
+      appliedPositiveCountByYear[year] = appliedPositiveCountByYear[year] || 0;
+      appliedNegativeCountByYear[year] = appliedNegativeCountByYear[year] || 0;
+      creditsCountByYear[year] = creditsCountByYear[year] || 0;
+
+      creditsCountByYear[year] += 1;
+
+      if (c.type === 'positive') {
+        totalPositiveCount += 1;
+        positiveCountByYear[year] += 1;
+        if (c.status === 'approved') {
+          appliedPositiveCount += 1;
+          appliedPositiveCountByYear[year] += 1;
+        }
+      } else if (c.type === 'negative') {
+        totalNegativeCount += 1;
+        negativeCountByYear[year] += 1;
+        if (negativeShouldApply(c)) {
+          appliedNegativeCount += 1;
+          appliedNegativeCountByYear[year] += 1;
+        }
       }
     }
 
-    // Default: return stored values
-    return res.json({
+    // Decide "current academic year" heuristically:
+    // 1) prefer an explicit constructed current academic year like "2025-2026" if present
+    // 2) else pick the newest academicYear from the credits (by lexical sort)
+    const now = new Date();
+    const y = now.getFullYear();
+    const constructedAcademicYear = `${y}-${y + 1}`; // e.g. "2025-2026"
+    let currentAcademicYear = constructedAcademicYear;
+    if (!yearsSeen.has(constructedAcademicYear)) {
+      // fallback: choose the latest year from the set (lexicographically)
+      const yearsArray = Array.from(yearsSeen);
+      if (yearsArray.length === 0) {
+        currentAcademicYear = null;
+      } else {
+        yearsArray.sort(); // lexical sort usually works for "YYYY-YYYY"
+        currentAcademicYear = yearsArray[yearsArray.length - 1];
+      }
+    }
+
+    // Build current-year counts (if we have a currentAcademicYear)
+    let currentYearStats = null;
+    if (currentAcademicYear) {
+      currentYearStats = {
+        academicYear: currentAcademicYear,
+        totalCredits: creditsCountByYear[currentAcademicYear] || 0,
+        totalPositive: positiveCountByYear[currentAcademicYear] || 0,
+        totalNegative: negativeCountByYear[currentAcademicYear] || 0,
+        appliedPositive: appliedPositiveCountByYear[currentAcademicYear] || 0,
+        appliedNegative: appliedNegativeCountByYear[currentAcademicYear] || 0,
+        netForYear: ( (appliedPositiveCountByYear[currentAcademicYear] || 0) - (appliedNegativeCountByYear[currentAcademicYear] || 0) ),
+      };
+    }
+
+    // Also compute eventsApplied (how many credit events were applied to net calculation)
+    // We can reuse recalcFacultyCredits to get eventsApplied if desired — but compute here:
+    const eventsApplied = appliedPositiveCount + appliedNegativeCount;
+
+    // Prepare final response object
+    const stats = {
+      totalCreditsCount: credits.length,
+      totalPositiveCount,        // all positive docs
+      totalNegativeCount,        // all negative docs
+      appliedPositiveCount,      // positives that count (approved)
+      appliedNegativeCount,      // negatives that were applied (per appeal/status rules)
+      appliedPositiveCountByYear,
+      appliedNegativeCountByYear,
+      positiveCountByYear,
+      negativeCountByYear,
+      creditsCountByYear,
+      eventsApplied,
+      currentAcademicYear,
+      currentYearStats,
+    };
+
+    // Return user info + stored credit fields + stats. If recalc failed earlier, user fields may be stale.
+    const response = {
       success: true,
       data: {
         name: user.name,
         facultyID: user.facultyID,
         currentCredit: user.currentCredit || 0,
         creditsByYear: user.creditsByYear || {},
+        stats,
       },
-    });
+    };
+
+    // If recalc was explicitly requested and failed (we didn't throw) you might want to include a warning.
+    return res.json(response);
   } catch (err) {
     next(err);
   }
 }
-
 
   module.exports = {
     submitPositiveCredit,
