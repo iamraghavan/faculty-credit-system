@@ -9,6 +9,8 @@ const mongoSanitize = require('express-mongo-sanitize');
 const rateLimitMiddleware = require('./Middleware/rateLimitMiddleware');
 const { errorHandler } = require('./Middleware/errorMiddleware');
 
+
+
 // Routes
 const authRoutes = require('./Routes/authRoutes');
 const userRoutes = require('./Routes/userRoutes');
@@ -21,6 +23,8 @@ const notificationRoutes = require('./Routes/notificationRoutes');
 const healthRouter = require('./Routes/health');
 
 const app = express();
+
+
 
 app.use(express.json({ limit: '10mb' })); // parse JSON body
 app.use(express.urlencoded({ extended: true, limit: '10mb' })); // parse URL-encoded

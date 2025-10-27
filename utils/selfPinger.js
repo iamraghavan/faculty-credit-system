@@ -16,7 +16,7 @@ function startSelfPinger(app, opts = {}) {
   const port = process.env.PORT || app.get('port') || 3000;
   // choose host; prefer explicit env var (useful on some hosts)
   const hostEnv = process.env.SELF_PINGER_HOST; // optional: e.g. 'https://my-app.example.com'
-  const baseUrl = hostEnv || `http://localhost:${port}`;
+const baseUrl = hostEnv || `http://172.16.20.129:${port}`;
 
   let stopped = false;
   async function pingOnce() {

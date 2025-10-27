@@ -1,12 +1,11 @@
 // index.js
 require('dotenv').config();
 const http = require('http');
-const app = require('./server');        // your Express app
+const app = require('./server'); // your Express app
 const connectDB = require('./config/db');
-const { startSelfPinger } = require('./utils/selfPinger');
 const { attachSocket } = require('./realtime/socketServer'); // make sure path is correct
 
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT || 81;
 
 (async function start() {
   try {
@@ -20,40 +19,23 @@ const PORT = process.env.PORT || 8000;
     app.locals.io = io;
 
     // start listening
-    server.listen(PORT, () => {
-      console.log(`✅ Server started on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
+    server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server started on http://172.16.20.129:${PORT} [${process.env.NODE_ENV || 'development'}]`);
+});
 
-      // ---- SELF-PINGER START ----
-      if (process.env.ENABLE_SELF_PINGER === 'true') {
-        const pinger = startSelfPinger(app, {
-          intervalMs: parseInt(process.env.SELF_PINGER_INTERVAL_MS || '240000', 10),
-          endpoints: (process.env.SELF_PINGER_ENDPOINTS || '/api/health,/').split(',').map(s => s.trim()),
-          jitter: true
-        });
-        app.locals._selfPinger = pinger; // store reference to stop later if needed
-        console.log('🚀 Self-pinger started (keeping host awake)');
-      } else {
-        console.log('🟡 Self-pinger disabled (ENABLE_SELF_PINGER=false)');
-      }
-      // ---- SELF-PINGER END ----
-    });
-
-    // graceful shutdown: close http server and socket.io, stop pinger
+    // graceful shutdown: close http server and socket.io
     const gracefulShutdown = async () => {
-      console.log('🛑 Shutting down gracefully...');
+      console.log('Shutting down gracefully...');
       try {
-        if (app.locals._selfPinger) {
-          try { app.locals._selfPinger.stop(); } catch(e) { /* ignore */ }
-        }
         // stop accepting new connections
         server.close(() => {
-          console.log('✅ HTTP server closed');
+          console.log('HTTP server closed');
         });
 
         // close socket.io (disconnects clients)
         if (io && io.close) {
           io.close();
-          console.log('✅ Socket.IO closed');
+          console.log('Socket.IO closed');
         }
 
         // optional: give a few seconds for connections to drain
@@ -68,7 +50,7 @@ const PORT = process.env.PORT || 8000;
     process.on('SIGTERM', gracefulShutdown);
 
   } catch (err) {
-    console.error('❌ Failed to start server due to:', err);
+    console.error('Failed to start server due to:', err);
     process.exit(1);
   }
 })();
