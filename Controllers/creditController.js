@@ -424,10 +424,19 @@ async function recalcCreditsController(req, res, next) {
     next(err);
   }
 }
-
+/**
+ * GET /api/v1/credits/:facultyId/credits
+ * Accepts either:
+ *  - Mongo _id (e.g. 68fe57ee8877805cad729588)
+ *  - facultyID (e.g. EGSP/EC/49081)
+ *
+ * Optional query param:
+ *  - ?recalc=true  -> will recalculate credits before returning (awaits recalc)
+ */
 async function getFacultyCredits(req, res, next) {
   try {
     const { facultyId } = req.params;
+    const { recalc } = req.query;
 
     if (!facultyId) {
       return res.status(400).json({
@@ -436,9 +445,17 @@ async function getFacultyCredits(req, res, next) {
       });
     }
 
-   
-    const user = await User.findOne({ facultyID: facultyId })
-      .select('name facultyID currentCredit creditsByYear');
+    let user = null;
+
+    // If it's a valid ObjectId, try findById first
+    if (mongoose.Types.ObjectId.isValid(facultyId)) {
+      user = await User.findById(facultyId).select('name facultyID currentCredit creditsByYear');
+    }
+
+    // If not found by _id, try facultyID field
+    if (!user) {
+      user = await User.findOne({ facultyID: facultyId }).select('name facultyID currentCredit creditsByYear');
+    }
 
     if (!user) {
       return res.status(404).json({
@@ -447,6 +464,38 @@ async function getFacultyCredits(req, res, next) {
       });
     }
 
+    // Optionally recalc before returning (useful if you want freshest data)
+    if (String(recalc).toLowerCase() === 'true') {
+      try {
+        await recalcFacultyCredits(user._id);
+        // re-fetch the updated fields
+        const refreshed = await User.findById(user._id).select('name facultyID currentCredit creditsByYear').lean();
+        return res.json({
+          success: true,
+          data: {
+            name: refreshed.name,
+            facultyID: refreshed.facultyID,
+            currentCredit: refreshed.currentCredit || 0,
+            creditsByYear: refreshed.creditsByYear || {},
+          },
+        });
+      } catch (err) {
+        // If recalc fails, return a warning but still return the existing user data
+        console.error('Recalc failed:', err);
+        return res.status(200).json({
+          success: true,
+          warning: 'Recalculation failed, returning last-known values',
+          data: {
+            name: user.name,
+            facultyID: user.facultyID,
+            currentCredit: user.currentCredit || 0,
+            creditsByYear: user.creditsByYear || {},
+          },
+        });
+      }
+    }
+
+    // Default: return stored values
     return res.json({
       success: true,
       data: {
