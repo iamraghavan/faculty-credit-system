@@ -23,18 +23,20 @@ const {
 
 const { authMiddleware, adminOnly } = require('../Middleware/authMiddleware');
 
-// Multer configuration for file uploads
+// Configure multer to use memory storage (serverless-safe)
 const upload = multer({
-  dest: 'tmp/uploads/',
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (req, file, cb) => {
-    // only allow images/pdf
-    if (!file.mimetype.match(/\/(jpeg|png|jpg|pdf)$/)) {
-      return cb(new Error('File type not supported'), false);
-    }
+    const allowed = (process.env.ASSET_ALLOWED_EXT ||
+      'pdf,png,jpg,jpeg,webp,gif,svg,txt,csv,json,doc,docx,xls,xlsx,zip,mp4,webm'
+    ).split(',');
+    const ext = file.originalname.split('.').pop().toLowerCase();
+    if (!allowed.includes(ext)) return cb(new Error('File type not allowed'), false);
     cb(null, true);
   }
 });
+
 
 /**
  * Credit Titles
