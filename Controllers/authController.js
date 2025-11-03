@@ -5,11 +5,8 @@ const User = require('../Models/User');
 const { generateFacultyID, generateApiKey } = require('../utils/generateID');
 const { recalcFacultyCredits } = require('../utils/calculateCredits');
 
-
 /**
- * Register a new user (first user or subsequent users)
- * First user can be admin or faculty (role sent in body)
- * After first user, only logged-in admin can create new users
+ * Register a new user (DynamoDB version)
  */
 async function register(req, res, next) {
   try {
@@ -18,23 +15,22 @@ async function register(req, res, next) {
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
 
-    const existing = await User.findOne({ email });
-    if (existing) return res.status(400).json({ success: false, message: 'Email already exists' });
+    const existingUsers = await User.find({ email });
+    if (existingUsers.length > 0) {
+      return res.status(400).json({ success: false, message: 'Email already exists' });
+    }
 
-    let assignedRole = 'faculty'; // default role
+    let assignedRole = 'faculty'; // default
 
-    const userCount = await User.countDocuments();
-
-    if (userCount === 0) {
-      // First user can be any role sent in body (admin or faculty)
+    const allUsers = await User.find();
+    if (allUsers.length === 0) {
+      // First user can be admin or faculty
       if (role === 'admin') assignedRole = 'admin';
-      else assignedRole = 'faculty';
     } else {
       // Only logged-in admin can create new users
       if (!req.user || req.user.role !== 'admin') {
         return res.status(403).json({ success: false, message: 'Only admin can create users' });
       }
-      // Role can only be 'faculty' or 'admin'
       if (role === 'admin' || role === 'faculty') assignedRole = role;
     }
 
@@ -42,74 +38,66 @@ async function register(req, res, next) {
     const apiKey = generateApiKey();
     const hashed = await bcrypt.hash(password, 10);
 
-    const user = await User.create({
+    const newUser = await User.create({
       name,
       email,
       password: hashed,
       college,
+      department,
       facultyID,
       apiKey,
-      department,
       role: assignedRole,
+      currentCredit: 0,
+      creditsByYear: {},
     });
 
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '1h' });
+    const token = jwt.sign({ id: newUser._id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '1h' });
 
     res.status(201).json({
       success: true,
       data: {
-        id: user._id,
-        name: user.name,
-        facultyID: user.facultyID,
-        apiKey: user.apiKey,
-        role: user.role,
-        department: user.department,
+        id: newUser._id,
+        name: newUser.name,
+        facultyID: newUser.facultyID,
+        apiKey: newUser.apiKey,
+        role: newUser.role,
+        department: newUser.department,
         token,
       },
     });
-
   } catch (err) {
     next(err);
   }
 }
 
-
 /**
- * Login with email & password
+ * Login with email & password (DynamoDB version)
  */
 async function login(req, res, next) {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ success: false, message: 'Missing credentials' });
 
-    // get user including password
-    const user = await User.findOne({ email }).select('+password');
-    if (!user) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    const users = await User.find({ email });
+    if (users.length === 0) return res.status(401).json({ success: false, message: 'Invalid credentials' });
 
+    const user = users[0];
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(401).json({ success: false, message: 'Invalid credentials' });
 
-    // Recalculate credits before issuing token (ensures currentCredit is up-to-date)
-    try {
-      // Only recalc for faculty role (optional)
-      if (user.role === 'faculty') {
-        // await to ensure DB updated before returning the user payload
+    // Recalculate credits before issuing token
+    if (user.role === 'faculty') {
+      try {
         await recalcFacultyCredits(user._id);
-        // reload user to get latest currentCredit (optional)
-        await user.reload?.() || await user.populate(); // best-effort: if Mongoose has reload
-        // Alternatively re-fetch minimal fields:
-        // const updatedUser = await User.findById(user._id).lean();
+      } catch (err) {
+        console.error('Credit recalculation failed', err);
       }
-    } catch (recalcErr) {
-      // don't block login if recalculation fails for some reason — log it and continue.
-      console.error('Credit recalculation failed at login for user', user._id, recalcErr);
-      // Optionally you can return an error instead of continuing — depends on your requirements.
     }
 
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '1h' });
 
-    // fetch latest user snapshot for response (so client sees updated credits)
-    const freshUser = await User.findById(user._id).lean();
+    // Fetch updated user
+    const freshUser = await User.findById(user._id);
 
     res.json({
       success: true,
@@ -131,7 +119,7 @@ async function login(req, res, next) {
 }
 
 /**
- * Simple endpoint to refresh token (re-issue)
+ * Refresh token
  */
 async function refreshToken(req, res, next) {
   try {
