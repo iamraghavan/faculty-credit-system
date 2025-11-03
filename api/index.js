@@ -1,12 +1,13 @@
-const app = require('../server'); // your Express app
+// api/index.js
+const app = require('../server');
 const { connectDB } = require('../config/db');
 
 let isDbConnected = false;
 
 module.exports = async (req, res) => {
   if (!isDbConnected) {
-    await connectDB(); // connect once per cold start
+    await connectDB();
     isDbConnected = true;
   }
-  return app(req, res); // Vercel handles req/res
+  return app(req, res);
 };
