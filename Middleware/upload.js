@@ -2,7 +2,8 @@
 const multer = require('multer');
 const path = require('path');
 
-const storage = multer.memoryStorage(); // store files in memory
+// Use memory storage to avoid disk writes
+const storage = multer.memoryStorage();
 
 const upload = multer({
   storage,
