@@ -16,7 +16,7 @@ async function getProfile(req, res, next) {
 }
 
 /**
- * Update current user profile (with GitHub image upload)
+ * Update current user profile (with profile image upload)
  */
 async function updateProfile(req, res, next) {
   try {
@@ -38,16 +38,17 @@ async function updateProfile(req, res, next) {
       if (req.body[field] !== undefined) updates[field] = req.body[field];
     }
 
-    if (req.file) {
-      updates.profileImage = await handleProfileImageUpload(req.file);
+    // Handle profile image upload
+    if (req.files?.profileImage) {
+      const file = req.files.profileImage;
+      updates.profileImage = await handleProfileImageUpload(file);
     }
 
+    // Check if email is being updated
     if (updates.email && updates.email !== req.user.email) {
       const exists = await User.findOne({ email: updates.email });
       if (exists) {
-        return res
-          .status(400)
-          .json({ success: false, message: 'Email already in use' });
+        return res.status(400).json({ success: false, message: 'Email already in use' });
       }
     }
 
@@ -64,7 +65,7 @@ async function updateProfile(req, res, next) {
 }
 
 /**
- * Admin-only: create user (with optional GitHub image upload)
+ * Admin-only: create user (with optional profile image upload)
  */
 async function adminCreateUser(req, res, next) {
   try {
@@ -88,9 +89,7 @@ async function adminCreateUser(req, res, next) {
 
     const exists = await User.findOne({ email });
     if (exists)
-      return res
-        .status(400)
-        .json({ success: false, message: 'User already exists' });
+      return res.status(400).json({ success: false, message: 'User already exists' });
 
     const hashed = await bcrypt.hash(password, 10);
     const { generateFacultyID, generateApiKey } = require('../utils/generateID');
@@ -111,8 +110,10 @@ async function adminCreateUser(req, res, next) {
       role: role === 'admin' ? 'admin' : 'faculty',
     };
 
-    if (req.file) {
-      userData.profileImage = await handleProfileImageUpload(req.file);
+    // Handle profile image upload
+    if (req.files?.profileImage) {
+      const file = req.files.profileImage;
+      userData.profileImage = await handleProfileImageUpload(file);
     }
 
     const user = await User.create(userData);
@@ -261,48 +262,6 @@ async function getUserById(req, res, next) {
 }
 
 /**
- * Admin: update user (with GitHub image upload)
- */
-async function adminUpdateUser(req, res, next) {
-  try {
-    const allowedFields = [
-      'name',
-      'email',
-      'phone',
-      'department',
-      'college',
-      'role',
-      'isActive',
-      'profileImage',
-      'prefix',
-      'roleCategory',
-      'designation',
-    ];
-    const updates = {};
-
-    for (const field of allowedFields) {
-      if (req.body[field] !== undefined) updates[field] = req.body[field];
-    }
-
-    if (req.file) {
-      updates.profileImage = await handleProfileImageUpload(req.file);
-    }
-
-    const updated = await User.findByIdAndUpdate(
-      req.params.id,
-      { $set: updates },
-      { new: true, runValidators: true, select: '-password' }
-    );
-
-    if (!updated)
-      return res.status(404).json({ success: false, message: 'User not found' });
-    res.json({ success: true, data: updated });
-  } catch (err) {
-    next(err);
-  }
-}
-
-/**
  * Admin: delete user
  */
 async function deleteUser(req, res, next) {
@@ -316,12 +275,62 @@ async function deleteUser(req, res, next) {
   }
 }
 
+/**
+ * Admin: update user (with GitHub image upload)
+ */
+async function adminUpdateUser(req, res, next) {
+  try {
+    const allowedFields = [
+      'name',
+      'email',
+      'phone',
+      'department',
+      'college',
+      'role',
+      'isActive',
+      'prefix',
+      'roleCategory',
+      'designation',
+    ];
+    
+    const updates = {};
+
+    // Collect fields from request body
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined) {
+        updates[field] = req.body[field];
+      }
+    }
+
+    // Handle profile image upload
+    if (req.files?.profileImage) {
+      const file = req.files.profileImage;
+      updates.profileImage = await handleProfileImageUpload(file);
+    }
+
+    // Update user in database
+    const updated = await User.findByIdAndUpdate(
+      req.params.id,
+      { $set: updates },
+      { new: true, runValidators: true, select: '-password' }
+    );
+
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getProfile,
   updateProfile,
   adminCreateUser,
+  adminUpdateUser,
   listUsers,
   getUserById,
-  adminUpdateUser,
   deleteUser,
 };
