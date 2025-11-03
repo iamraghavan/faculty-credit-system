@@ -11,7 +11,7 @@ const {
   adminUpdateUser,
   deleteUser,
 } = require('../Controllers/userController');
-const { authMiddleware, adminOnly } = require('../Middleware/authMiddleware');
+const { authMiddleware } = require('../Middleware/authMiddleware');
 
 /**
  * User routes
@@ -22,7 +22,7 @@ router.put('/me', authMiddleware, upload.single('profileImage'), updateProfile);
 /**
  * Admin routes
  */
-router.post('/', authMiddleware, adminCreateUser);
+router.post('/', authMiddleware, upload.single('profileImage'), adminCreateUser);
 router.get('/', authMiddleware, listUsers);
 router.get('/:id', authMiddleware, getUserById);
 router.put('/:id', authMiddleware, upload.single('profileImage'), adminUpdateUser);

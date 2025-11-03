@@ -1,4 +1,3 @@
-// Controllers/userController.js
 const bcrypt = require('bcryptjs');
 const User = require('../Models/User');
 const { handleProfileImageUpload } = require('../utils/uploadProfileImage');
@@ -24,19 +23,25 @@ async function updateProfile(req, res, next) {
     if (!req.user)
       return res.status(401).json({ success: false, message: 'Unauthorized' });
 
-    const allowedFields = ['name', 'email', 'phone', 'department'];
+    const allowedFields = [
+      'name',
+      'email',
+      'phone',
+      'department',
+      'prefix',
+      'roleCategory',
+      'designation'
+    ];
     const updates = {};
 
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) updates[field] = req.body[field];
     }
 
-    // Handle profile image upload via GitHub
     if (req.file) {
       updates.profileImage = await handleProfileImageUpload(req.file);
     }
 
-    // Prevent duplicate email
     if (updates.email && updates.email !== req.user.email) {
       const exists = await User.findOne({ email: updates.email });
       if (exists) {
@@ -63,11 +68,23 @@ async function updateProfile(req, res, next) {
  */
 async function adminCreateUser(req, res, next) {
   try {
-    const { name, email, password, college, department, role } = req.body;
-    if (!name || !email || !college || !password)
-      return res
-        .status(400)
-        .json({ success: false, message: 'Missing required fields' });
+    const {
+      name,
+      email,
+      password,
+      college,
+      department,
+      role,
+      prefix,
+      roleCategory,
+      designation
+    } = req.body;
+
+    if (!name || !email || !college || !password || !roleCategory || !designation)
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields (include roleCategory & designation)',
+      });
 
     const exists = await User.findOne({ email });
     if (exists)
@@ -88,10 +105,12 @@ async function adminCreateUser(req, res, next) {
       department,
       facultyID,
       apiKey,
+      prefix: prefix || 'Mr.',
+      roleCategory,
+      designation,
       role: role === 'admin' ? 'admin' : 'faculty',
     };
 
-    // Upload profile image if provided
     if (req.file) {
       userData.profileImage = await handleProfileImageUpload(req.file);
     }
@@ -104,7 +123,7 @@ async function adminCreateUser(req, res, next) {
 }
 
 /**
- * Admin: get all users with filters and pagination
+ * Admin: list users with filters
  */
 const escapeRegExp = (str = '') =>
   str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -124,6 +143,8 @@ async function listUsers(req, res, next) {
       year,
       minCreditYear,
       maxCreditYear,
+      roleCategory,
+      designation,
       sortBy = 'createdAt',
       sortOrder = 'desc',
     } = req.query;
@@ -149,6 +170,12 @@ async function listUsers(req, res, next) {
 
     const roleArr = parseListToRegexArray(role);
     if (roleArr?.length) filter.role = { $in: roleArr };
+
+    const categoryArr = parseListToRegexArray(roleCategory);
+    if (categoryArr?.length) filter.roleCategory = { $in: categoryArr };
+
+    const desigArr = parseListToRegexArray(designation);
+    if (desigArr?.length) filter.designation = { $in: desigArr };
 
     if (typeof isActive !== 'undefined') {
       const val = String(isActive).toLowerCase();
@@ -190,6 +217,8 @@ async function listUsers(req, res, next) {
       'department',
       'role',
       'isActive',
+      'roleCategory',
+      'designation',
     ]);
     const sortField = safeSortFields.has(sortBy) ? sortBy : 'createdAt';
     const sort = { [sortField]: allowedSortOrder };
@@ -218,7 +247,7 @@ async function listUsers(req, res, next) {
 }
 
 /**
- * Admin: get a single user
+ * Admin: get user by ID
  */
 async function getUserById(req, res, next) {
   try {
@@ -245,6 +274,9 @@ async function adminUpdateUser(req, res, next) {
       'role',
       'isActive',
       'profileImage',
+      'prefix',
+      'roleCategory',
+      'designation',
     ];
     const updates = {};
 
@@ -252,7 +284,6 @@ async function adminUpdateUser(req, res, next) {
       if (req.body[field] !== undefined) updates[field] = req.body[field];
     }
 
-    // Handle profile image upload
     if (req.file) {
       updates.profileImage = await handleProfileImageUpload(req.file);
     }
@@ -272,7 +303,7 @@ async function adminUpdateUser(req, res, next) {
 }
 
 /**
- * Admin: delete a user
+ * Admin: delete user
  */
 async function deleteUser(req, res, next) {
   try {

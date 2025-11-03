@@ -15,7 +15,7 @@ const {
   adminListNegativeCredits,
   adminGetNegativeCreditById,
   adminGetFacultyByNegativeCreditId,
-    adminListNegativeCreditAppeals,
+  adminListNegativeCreditAppeals,
   adminGetAppealByCreditId,
   adminUpdateAppealStatus,
   getNegativeAppeals
