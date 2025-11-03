@@ -1,6 +1,7 @@
 // models/User.js
 const { newObjectId } = require('../utils/objectId');
 const { getDynamoClient } = require('../config/db');
+require('dotenv').config();
 const { PutCommand, GetCommand, ScanCommand, UpdateCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb');
 
 const TABLE = process.env.DYNAMO_DB_USERS;
