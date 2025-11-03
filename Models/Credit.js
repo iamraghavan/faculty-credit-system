@@ -1,56 +1,57 @@
-const mongoose = require('mongoose');
+// models/Credit.js
+const { newObjectId } = require('../utils/objectId');
+const { getDynamoClient } = require('../config/db');
+const { PutCommand, GetCommand, ScanCommand, UpdateCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb');
 
-const creditSchema = new mongoose.Schema(
-  {
-    faculty: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    facultySnapshot: {
-      facultyID: String,
-      name: String,
-      college: String,
-      department: String,
-    },
-    type: { type: String, enum: ['positive', 'negative'], required: true },
-    creditTitle: { type: mongoose.Schema.Types.ObjectId, ref: 'CreditTitle' },
+const TABLE = process.env.DYNAMO_DB_CREDITS;
 
-    title: { type: String, required: true },
-    points: { type: Number, required: true },
-    categories: { type: [String], default: [] },
-
-    proofUrl: String,
-    proofMeta: {
-      originalName: String,
-      size: Number,
-      mimeType: String,
-    },
-    academicYear: { type: String, required: true },
-    issuedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-
-    status: {
-      type: String,
-      enum: ['pending', 'approved', 'rejected', 'appealed'],
-      default: 'approved',
-    },
-
-    appeal: {
-      by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-      reason: String,
-      proofUrl: String,
-      proofMeta: {
-        originalName: String,
-        size: Number,
-        mimeType: String,
-      },
-      createdAt: Date,
-      status: { type: String, enum: ['pending', 'accepted', 'rejected'] },
-    },
-
-    notes: String,
+module.exports = {
+  async create(data) {
+    const client = getDynamoClient();
+    const item = {
+      _id: newObjectId(),
+      status: data.status || 'pending',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...data,
+    };
+    await client.send(new PutCommand({ TableName: TABLE, Item: item }));
+    return item;
   },
-  { timestamps: true }
-);
 
-creditSchema.index({ faculty: 1, academicYear: 1 });
-creditSchema.index({ type: 1 });
-creditSchema.index({ 'appeal.status': 1 });
+  async find(filter = {}) {
+    const client = getDynamoClient();
+    const res = await client.send(new ScanCommand({ TableName: TABLE }));
+    return res.Items.filter((c) =>
+      Object.entries(filter).every(([k, v]) => c[k] === v)
+    );
+  },
 
-module.exports = mongoose.model('Credit', creditSchema);
+  async findById(id) {
+    const client = getDynamoClient();
+    const res = await client.send(new GetCommand({ TableName: TABLE, Key: { _id: id } }));
+    return res.Item || null;
+  },
+
+  async update(id, data) {
+    const client = getDynamoClient();
+    const updates = Object.entries(data).map(([k, v]) => `#${k} = :${k}`);
+    const expNames = Object.fromEntries(Object.keys(data).map((k) => [`#${k}`, k]));
+    const expValues = Object.fromEntries(Object.entries(data).map(([k, v]) => [`:${k}`, v]));
+
+    await client.send(new UpdateCommand({
+      TableName: TABLE,
+      Key: { _id: id },
+      UpdateExpression: `SET ${updates.join(', ')}`,
+      ExpressionAttributeNames: expNames,
+      ExpressionAttributeValues: expValues,
+    }));
+    return { _id: id, ...data };
+  },
+
+  async delete(id) {
+    const client = getDynamoClient();
+    await client.send(new DeleteCommand({ TableName: TABLE, Key: { _id: id } }));
+    return { deleted: true };
+  },
+};

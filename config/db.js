@@ -1,22 +1,37 @@
-// config/db.js - MongoDB connection
-const mongoose = require('mongoose');
+// config/db.js
+const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBDocumentClient } = require('@aws-sdk/lib-dynamodb');
 
+let dynamoDocClient;
+
+/**
+ * Connect to DynamoDB
+ */
 const connectDB = async () => {
-  try {
-    const uri = process.env.MONGO_URI;
-    if (!uri) {
-      throw new Error('MONGO_URI is not set in environment variables');
-    }
+  if (dynamoDocClient) return dynamoDocClient; // already connected
 
-    // Connect to MongoDB
-    await mongoose.connect(uri);
+  const client = new DynamoDBClient({
+    region: process.env.AWS_REGION,
+    credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    },
+  });
 
-    console.log('✅ Connected to MongoDB:', uri.split('@')[1].split('/')[1]);
+  dynamoDocClient = DynamoDBDocumentClient.from(client);
 
-  } catch (error) {
-    console.error('❌ Failed to connect to MongoDB:', error.message);
-    process.exit(1); // Exit process with failure
-  }
+  console.log(`✅ Connected to DynamoDB (${process.env.AWS_REGION})`);
+  return dynamoDocClient;
 };
 
-module.exports = connectDB;
+/**
+ * Get DynamoDB Document Client
+ */
+const getDynamoClient = () => {
+  if (!dynamoDocClient) {
+    throw new Error('DynamoDB client not initialized. Call connectDB first.');
+  }
+  return dynamoDocClient;
+};
+
+module.exports = { connectDB, getDynamoClient };

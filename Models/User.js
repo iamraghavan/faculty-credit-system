@@ -1,48 +1,59 @@
-const mongoose = require('mongoose');
+// models/User.js
+const { newObjectId } = require('../utils/objectId');
+const { getDynamoClient } = require('../config/db');
+const { PutCommand, GetCommand, ScanCommand, UpdateCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb');
 
-const userSchema = new mongoose.Schema(
-  {
-    name: { type: String, required: true },
+const TABLE = process.env.DYNAMO_DB_USERS;
 
-    // 👇 Added prefix field
-    prefix: {
-      type: String,
-      enum: ['Mr.', 'Ms.', 'Mrs.', 'Dr.'],
-      default: 'Mr.'
-    },
-
-    facultyID: { type: String, required: true, unique: true }, // EGSP/EC/12345
-    college: { type: String, required: true },
-    department: { type: String },
-
-    email: { type: String, required: true, unique: true, lowercase: true },
-    password: { type: String, required: true, select: false },
-
-    // 👇 Keeps the user level (admin/faculty)
-    role: { type: String, enum: ['faculty', 'admin'], default: 'faculty' },
-
-    // 👇 New fields for teaching category & designation
-    roleCategory: {
-      type: String,
-      enum: ['Teaching', 'Non-Teaching'],
-      required: true
-    },
-    designation: { type: String, required: true }, // e.g., "Asst. Prof", "Lab Assistant"
-
-    apiKey: { type: String, unique: true, required: true },
-    currentCredit: { type: Number, default: 0 },
-    creditsByYear: { type: Map, of: Number, default: {} },
-    isActive: { type: Boolean, default: true },
-    phone: { type: String },
-    profileImage: { type: String },
+module.exports = {
+  async create(data) {
+    const client = getDynamoClient();
+    const item = {
+      _id: newObjectId(),
+      prefix: data.prefix || 'Mr.',
+      isActive: data.isActive ?? true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...data,
+    };
+    await client.send(new PutCommand({ TableName: TABLE, Item: item }));
+    return item;
   },
-  { timestamps: true }
-);
 
-// Indexes for performance
-userSchema.index({ department: 1 });
-userSchema.index({ college: 1 });
-userSchema.index({ role: 1 });
-userSchema.index({ isActive: 1 });
+  async find(filter = {}) {
+    const client = getDynamoClient();
+    const res = await client.send(new ScanCommand({ TableName: TABLE }));
+    return res.Items.filter((u) =>
+      Object.entries(filter).every(([k, v]) => u[k] === v)
+    );
+  },
 
-module.exports = mongoose.model('User', userSchema);
+  async findById(id) {
+    const client = getDynamoClient();
+    const res = await client.send(new GetCommand({ TableName: TABLE, Key: { _id: id } }));
+    return res.Item || null;
+  },
+
+  async update(id, data) {
+    const client = getDynamoClient();
+    const updates = Object.entries(data).map(([k, v]) => `#${k} = :${k}`);
+    const expNames = Object.fromEntries(Object.keys(data).map((k) => [`#${k}`, k]));
+    const expValues = Object.fromEntries(Object.entries(data).map(([k, v]) => [`:${k}`, v]));
+
+    await client.send(new UpdateCommand({
+      TableName: TABLE,
+      Key: { _id: id },
+      UpdateExpression: `SET ${updates.join(', ')}`,
+      ExpressionAttributeNames: expNames,
+      ExpressionAttributeValues: expValues,
+    }));
+
+    return { _id: id, ...data };
+  },
+
+  async delete(id) {
+    const client = getDynamoClient();
+    await client.send(new DeleteCommand({ TableName: TABLE, Key: { _id: id } }));
+    return { deleted: true };
+  },
+};

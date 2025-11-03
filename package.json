@@ -5,16 +5,21 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "pm2 start index.js --name faculty-credit-system --watch"
+    "dev": "nodemon index.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.922.0",
+    "@aws-sdk/lib-dynamodb": "^3.922.0",
     "@octokit/rest": "^22.0.0",
+    "@vendia/serverless-express": "^4.12.6",
+    "aws-lambda": "^1.0.7",
     "axios": "^1.12.2",
     "bcryptjs": "^3.0.2",
+    "bson": "^6.10.4",
     "colors": "^1.4.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
