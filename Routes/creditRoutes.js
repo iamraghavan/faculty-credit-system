@@ -12,6 +12,7 @@ const {
   getNegativeCreditsByFacultyId,
   recalcCreditsController,
   getFacultyCredits,
+  uploadExcel,
 } = require('../Controllers/creditController');
 
 const { authMiddleware, adminOnly } = require('../Middleware/authMiddleware');
@@ -58,5 +59,7 @@ router.get(
 
 router.post('/credits/:facultyId/recalc-credits', authMiddleware, recalcCreditsController);
 router.get('/:facultyId/credits', getFacultyCredits);
+// Upload Excel route
+router.post('/upload-excel', upload.single('file'), creditTitleController.uploadExcel);
 
 module.exports = router;

@@ -610,6 +610,44 @@ async function getFacultyCredits(req, res, next) {
   }
 }
 
+/**
+ * Upload Excel and save rows to DynamoDB
+ */
+exports.uploadExcel = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'No file uploaded' });
+    }
+
+    // Read Excel file
+    const workbook = XLSX.readFile(req.file.path);
+    const sheetName = workbook.SheetNames[0]; // first sheet
+    const worksheet = workbook.Sheets[sheetName];
+
+    // Convert to JSON
+    const rows = XLSX.utils.sheet_to_json(worksheet);
+
+    // Insert each row into DynamoDB
+    const inserted = [];
+    for (const row of rows) {
+      // Optional: normalize keys (e.g., isActive to boolean, points to number)
+      if (row.points) row.points = Number(row.points);
+      if (row.isActive !== undefined) row.isActive = row.isActive === true || row.isActive === 'TRUE';
+      
+      const item = await CreditTitle.create(row);
+      inserted.push(item);
+    }
+
+    // Remove uploaded file
+    fs.unlinkSync(req.file.path);
+
+    return res.status(200).json({ message: 'Excel uploaded successfully', count: inserted.length, data: inserted });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Error uploading Excel', error: error.message });
+  }
+};
+
   module.exports = {
     submitPositiveCredit,
     appealNegativeCredit,
@@ -621,5 +659,7 @@ async function getFacultyCredits(req, res, next) {
     getNegativeCreditsByFacultyId,
     recalcCreditsController,
     getFacultyCredits,
+    uploadExcel,
+    
   };
 

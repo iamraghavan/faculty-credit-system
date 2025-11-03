@@ -2,7 +2,7 @@
 const { newObjectId } = require('../utils/objectId');
 const { getDynamoClient } = require('../config/db');
 const { PutCommand, GetCommand, ScanCommand, UpdateCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb');
-
+require('dotenv').config();
 const TABLE = process.env.DYNAMO_DB_TITLES;
 
 module.exports = {
