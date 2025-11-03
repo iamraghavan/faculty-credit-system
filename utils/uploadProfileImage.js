@@ -1,19 +1,18 @@
-const { uploadFileToGitHubBuffer } = require('./githubUpload');
+// utils/uploadProfileImage.js
+const { uploadFileToGitHub } = require('./githubUpload');
 
 /**
- * Uploads an image buffer to GitHub and returns the jsDelivr URL.
- *
- * @param {Express.Multer.File} file - The uploaded file object from Multer
- * @param {string} folder - Optional folder inside repo, default: 'profileImages'
- * @returns {Promise<string>} - URL of uploaded file
+ * Uploads a file buffer to GitHub and returns the jsDelivr URL
+ * @param {Express.Multer.File} file
+ * @param {string} folder
  */
 async function handleProfileImageUpload(file, folder = 'profileImages') {
-  if (!file || !file.buffer) return null;
+  if (!file) return null;
 
-  const destPath = `${folder}/${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`;
+  const destPath = `${folder}/${Date.now()}-${Math.round(Math.random() * 1e9)}${file.originalname}`;
 
-  // upload buffer directly
-  const url = await uploadFileToGitHubBuffer(file.buffer, destPath);
+  // Upload using buffer
+  const url = await uploadFileToGitHub(file.buffer, destPath, file.originalname);
   return url;
 }
 
