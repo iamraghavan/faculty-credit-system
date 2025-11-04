@@ -1,11 +1,26 @@
-const mongoose = require('mongoose');
-const CreditTitle = require('../Models/CreditTitle');
-const Credit = require('../Models/Credit');
-const User = require('../Models/User');
+// controllers/creditController.js
+
+const mongoose = require('mongoose'); // still used for User model id checks
+const CreditTitle = require('../Models/CreditTitle'); // Dynamo model
+const Credit = require('../Models/Credit'); // Dynamo model
+const User = require('../Models/User'); // mongoose-backed
 const fs = require('fs');
 const path = require('path');
 
 const { recalcFacultyCredits } = require('../utils/calculateCredits');
+const { uploadFileToGitHub } = require('../utils/githubUpload');
+const { connectDB } = require('../config/db');
+
+/**
+ * Ensure DynamoDB client is connected
+ */
+async function ensureDb() {
+  try {
+    await connectDB();
+  } catch (err) {
+    throw err;
+  }
+}
 
 /**
  * Helper to emit via socket
@@ -18,261 +33,372 @@ const emitSocket = (req, event, payload) => {
 };
 
 /**
- * Admin creates credit title
+ * Helper: handle GitHub file upload and return proofUrl & proofMeta
+ */
+async function handleFileUpload(file, folder) {
+  if (!file) return {};
+
+  const tmpPath = file.path;
+  const originalName = file.originalname || 'upload';
+  const safeName = path.basename(originalName).replace(/[^\w.\-() ]+/g, '_').slice(0, 200);
+  const destPath = `${folder}/${Date.now()}_${safeName}`;
+
+  if (!process.env.GITHUB_TOKEN || !process.env.ASSET_GH_REPO || !process.env.ASSET_GH_OWNER) {
+    try { fs.unlinkSync(tmpPath); } catch (e) {}
+    throw new Error('GitHub upload not configured. Set ASSET_GH_OWNER, ASSET_GH_REPO, and GITHUB_TOKEN.');
+  }
+
+  try {
+    const proofUrl = await uploadFileToGitHub(tmpPath, destPath);
+    try { fs.unlinkSync(tmpPath); } catch (e) {}
+    return {
+      proofUrl,
+      proofMeta: {
+        originalName,
+        size: file.size,
+        mimeType: file.mimetype,
+      },
+    };
+  } catch (err) {
+    try { fs.unlinkSync(tmpPath); } catch (e) {}
+    throw new Error('Failed to upload file to GitHub: ' + err.message);
+  }
+}
+
+/**
+ * Admin creates credit title (Dynamo)
  */
 async function createCreditTitle(req, res, next) {
   try {
+    await ensureDb();
+
     const actor = req.user;
     const { title, points, type, description } = req.body;
-    if (!title || !points) return res.status(400).json({ success: false, message: 'Title and points required' });
+    if (!title || points === undefined) return res.status(400).json({ success: false, message: 'Title and points required' });
 
-    const ct = await CreditTitle.create({ title, points, type: type || 'positive', description, createdBy: actor._id });
+    const ct = await CreditTitle.create({
+      title,
+      points: Number(points),
+      type: type || 'positive',
+      description,
+      createdBy: String(actor._id),
+      isActive: true,
+    });
 
-    res.status(201).json({ success: true, data: ct });
-  } catch (err) {
-    next(err);
-  }
-}
-
-async function listCreditTitles(req, res, next) {
-  try {
-    const items = await CreditTitle.find({ isActive: true });
-    res.json({ success: true, total: items.length, items });
-  } catch (err) {
-    next(err);
-  }
-}
-
-async function updateCreditTitle(req, res, next) {
-  try {
-    const { id } = req.params;
-    const { title, points, type, description } = req.body;
-
-    const updated = await CreditTitle.findByIdAndUpdate(id, { title, points, type, description }, { new: true, runValidators: true });
-    if (!updated) return res.status(404).json({ success: false, message: 'Credit title not found' });
-
-    res.json({ success: true, data: updated });
-  } catch (err) {
-    next(err);
-  }
-}
-
-async function deleteCreditTitle(req, res, next) {
-  try {
-    const { id } = req.params;
-    const deleted = await CreditTitle.findByIdAndUpdate(id, { isActive: false }, { new: true });
-    if (!deleted) return res.status(404).json({ success: false, message: 'Credit title not found' });
-
-    res.json({ success: true, message: 'Credit title deactivated', data: deleted });
+    return res.status(201).json({ success: true, data: ct });
   } catch (err) {
     next(err);
   }
 }
 
 /**
- * Admin issues negative credit to faculty
+ * List credit titles (Dynamo)
+ */
+async function listCreditTitles(req, res, next) {
+  try {
+    await ensureDb();
+    // If your Dynamo model supports filter, you'd pass { isActive: true }
+    const items = await CreditTitle.find({ isActive: true });
+    return res.json({ success: true, total: items.length, items });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Update credit title (Dynamo)
+ */
+async function updateCreditTitle(req, res, next) {
+  try {
+    await ensureDb();
+    const { id } = req.params;
+    const { title, points, type, description } = req.body;
+
+    const existing = await CreditTitle.findById(id);
+    if (!existing) return res.status(404).json({ success: false, message: 'Credit title not found' });
+
+    const updated = await CreditTitle.update(id, {
+      title: title ?? existing.title,
+      points: points !== undefined ? Number(points) : existing.points,
+      type: type ?? existing.type,
+      description: description ?? existing.description,
+      updatedAt: new Date().toISOString(),
+    });
+
+    return res.json({ success: true, data: updated });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Delete (soft) credit title (Dynamo)
+ */
+async function deleteCreditTitle(req, res, next) {
+  try {
+    await ensureDb();
+    const { id } = req.params;
+
+    const existing = await CreditTitle.findById(id);
+    if (!existing) return res.status(404).json({ success: false, message: 'Credit title not found' });
+
+    const updated = await CreditTitle.update(id, { isActive: false, updatedAt: new Date().toISOString() });
+    return res.json({ success: true, message: 'Credit title deactivated', data: updated });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Admin issues negative credit to faculty (Dynamo)
  * POST body: { facultyId, creditTitleId, title, points, notes, academicYear }
  */
 async function issueNegativeCredit(req, res, next) {
-  const session = await mongoose.startSession();
-  session.startTransaction();
   try {
+    await ensureDb();
+
     const admin = req.user;
     const { facultyId, creditTitleId, title, points, notes, academicYear } = req.body;
 
-    if (!facultyId || !points || !academicYear) {
-      await session.abortTransaction();
+    if (!facultyId || (!points && points !== 0) || !academicYear) {
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
 
-    const faculty = await User.findById(facultyId).session(session);
-    if (!faculty) {
-      await session.abortTransaction();
-      return res.status(404).json({ success: false, message: 'Faculty not found' });
+    // Find faculty (mongoose)
+    const faculty = await User.findById(facultyId);
+    if (!faculty) return res.status(404).json({ success: false, message: 'Faculty not found' });
+
+    // find creditTitle (dynamo) if provided
+    let creditTitle = null;
+    if (creditTitleId) creditTitle = await CreditTitle.findById(creditTitleId);
+
+    // upload file if provided
+    let proofUrl, proofMeta;
+    if (req.file) {
+      const uploadResult = await handleFileUpload(req.file, `credits/${academicYear}`);
+      proofUrl = uploadResult.proofUrl;
+      proofMeta = uploadResult.proofMeta;
     }
 
-    const creditTitle = creditTitleId ? await CreditTitle.findById(creditTitleId).session(session) : null;
-
-    const credit = new Credit({
-      faculty: faculty._id,
-      facultySnapshot: { name: faculty.name, facultyID: faculty.facultyID, college: faculty.college, department: faculty.department },
+    const creditItem = await Credit.create({
+      faculty: String(faculty._id),
+      facultySnapshot: {
+        name: faculty.name,
+        facultyID: faculty.facultyID,
+        college: faculty.college,
+        department: faculty.department,
+      },
       type: 'negative',
-      creditTitle: creditTitle?._id,
-      title: title || creditTitle?.title,
-      points,
+      creditTitle: creditTitle ? String(creditTitle._id) : undefined,
+      title: title || (creditTitle && creditTitle.title) || 'Negative Credit',
+      points: Number(points),
       notes,
       academicYear,
-      issuedBy: admin._id,
-      proofUrl: req.file ? `/uploads/${req.file.filename}` : undefined,
-      proofMeta: req.file ? { originalName: req.file.originalname, size: req.file.size, mimeType: req.file.mimetype } : undefined
+      issuedBy: String(admin._id),
+      proofUrl,
+      proofMeta,
+      status: 'pending',
     });
 
-    await credit.save({ session });
-    await session.commitTransaction();
-    session.endSession();
+    // Recalc and emit
+    try { await recalcFacultyCredits(faculty._id); } catch (e) { /* log & continue */ }
+    emitSocket(req, 'credit:negative:new', { facultyId: String(faculty._id), credit: creditItem });
 
-    // Emit real-time notification to frontend
-    emitSocket(req, 'credit:negative:new', { facultyId, credit });
-
-    res.status(201).json({ success: true, data: credit });
+    return res.status(201).json({ success: true, data: creditItem });
   } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
     next(err);
   }
 }
 
 /**
- * List negative credits for a specific faculty
+ * List negative credits for a specific faculty (Dynamo)
  */
 async function listNegativeCreditsForFaculty(req, res, next) {
   try {
+    await ensureDb();
+
     const { facultyId } = req.params;
     if (req.user.role !== 'faculty' && req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'Forbidden' });
 
-    if (req.user.role === 'faculty' && req.user._id.toString() !== facultyId) {
+    if (req.user.role === 'faculty' && String(req.user._id) !== String(facultyId)) {
       return res.status(403).json({ success: false, message: 'Cannot view other faculty credits' });
     }
 
-    const credits = await Credit.find({ faculty: facultyId, type: 'negative' })
-      .sort('-createdAt')
-      .populate('issuedBy', 'name email role')
-      .populate('creditTitle', 'title points');
+    const items = await Credit.find({ faculty: String(facultyId), type: 'negative' });
 
-    res.json({ success: true, total: credits.length, items: credits });
+    // sort desc by createdAt
+    items.sort((a, b) => {
+      if (!a.createdAt && !b.createdAt) return 0;
+      if (!a.createdAt) return 1;
+      if (!b.createdAt) return -1;
+      return b.createdAt.localeCompare(a.createdAt);
+    });
+
+    // Optionally populate issuedBy and creditTitle by fetching separately (Dynamo doesn't populate)
+    // For now we return facultySnapshot (present) and issuedBy id if needed.
+
+    return res.json({ success: true, total: items.length, items });
   } catch (err) {
     next(err);
   }
 }
 
 /**
- * Positive credits listing for admin (already optimized)
+ * Positive credits listing for admin (Dynamo)
+ * Query params: status, facultyId, academicYear, fromDate, toDate, page, limit, sort, search
+ *
+ * NOTE: Credit.find performs a full table scan and returns items filtered in-memory.
+ * For production, create a GSI on (type, faculty) or similar and implement query.
  */
 async function listPositiveCreditsForAdmin(req, res, next) {
   try {
+    await ensureDb();
+
     const { status, facultyId, academicYear, fromDate, toDate, page = 1, limit = 20, sort = '-createdAt', search } = req.query;
 
-    const filter = { type: 'positive' };
-    if (status) filter.status = { $in: status.split(',') };
-    if (facultyId) filter.faculty = facultyId;
-    if (academicYear) filter.academicYear = academicYear;
-    if (fromDate || toDate) filter.createdAt = { ...(fromDate && { $gte: new Date(fromDate) }), ...(toDate && { $lte: new Date(toDate) }) };
-    if (search) filter.$or = [
-      { title: { $regex: search, $options: 'i' } },
-      { notes: { $regex: search, $options: 'i' } },
-      { 'facultySnapshot.name': { $regex: search, $options: 'i' } },
-      { 'facultySnapshot.facultyID': { $regex: search, $options: 'i' } }
-    ];
+    // Build filter object for Credit.find (equality checks). Complex filters (regex, date ranges) will be applied in-memory after scan.
+    const baseFilter = { type: 'positive' };
+    if (facultyId) baseFilter.faculty = String(facultyId);
+    if (academicYear) baseFilter.academicYear = String(academicYear);
 
-    const skip = (page - 1) * limit;
-    const [total, items] = await Promise.all([
-      Credit.countDocuments(filter),
-      Credit.find(filter)
-        .populate('faculty', 'name facultyID email college department')
-        .populate('creditTitle', 'title points type')
-        .sort(sort)
-        .skip(skip)
-        .limit(Number(limit))
-    ]);
+    // initial fetch (scan+filter)
+    let items = await Credit.find(baseFilter);
 
-    res.json({ success: true, total, page: Number(page), limit: Number(limit), items });
+    // in-memory filters:
+    if (status) {
+      const wanted = status.split(',').map(s => s.trim().toLowerCase());
+      items = items.filter(it => wanted.includes(String(it.status || '').toLowerCase()));
+    }
+
+    if (fromDate || toDate) {
+      items = items.filter(it => {
+        const created = it.createdAt ? new Date(it.createdAt) : null;
+        if (!created) return false;
+        if (fromDate && created < new Date(fromDate)) return false;
+        if (toDate && created > new Date(toDate)) return false;
+        return true;
+      });
+    }
+
+    if (search) {
+      const q = String(search).trim().toLowerCase();
+      items = items.filter(it => {
+        const title = String(it.title || '').toLowerCase();
+        const notes = String(it.notes || '').toLowerCase();
+        const fname = String(it.facultySnapshot?.name || '').toLowerCase();
+        const fid = String(it.facultySnapshot?.facultyID || '').toLowerCase();
+        return title.includes(q) || notes.includes(q) || fname.includes(q) || fid.includes(q);
+      });
+    }
+
+    // sort
+    const desc = String(sort).startsWith('-');
+    const sortKey = desc ? sort.slice(1) : sort;
+    items.sort((a, b) => {
+      const va = a[sortKey] || '';
+      const vb = b[sortKey] || '';
+      return desc ? String(vb).localeCompare(String(va)) : String(va).localeCompare(String(vb));
+    });
+
+    const total = items.length;
+    const skip = (Math.max(Number(page), 1) - 1) * Math.max(Number(limit), 1);
+    const paged = items.slice(skip, skip + Math.max(Number(limit), 1));
+
+    return res.json({ success: true, total, page: Number(page), limit: Number(limit), items: paged });
   } catch (err) {
     next(err);
   }
 }
 
 /**
- * Positive credit update status
+ * Positive credit update status (Dynamo)
+ * PATCH /.../:id/status  Body: { status, notes }
  */
 async function updatePositiveCreditStatus(req, res, next) {
-  const session = await mongoose.startSession();
-  session.startTransaction();
   try {
+    await ensureDb();
+
     const { id } = req.params;
     const { status, notes } = req.body;
 
     const allowed = ['pending', 'approved', 'rejected', 'appealed'];
-    if (!allowed.includes(status)) {
-      await session.abortTransaction();
-      session.endSession();
+    if (!allowed.includes(String(status))) {
       return res.status(400).json({ success: false, message: 'Invalid status' });
     }
 
-    const credit = await Credit.findById(id).session(session);
-    if (!credit) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({ success: false, message: 'Credit not found' });
-    }
+    const credit = await Credit.findById(id);
+    if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
+    if (credit.type !== 'positive') return res.status(400).json({ success: false, message: 'Not a positive credit' });
 
-    if (credit.type !== 'positive') {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ success: false, message: 'Not a positive credit' });
-    }
-
-    // Load faculty inside transaction to ensure it exists (we won't update it here)
-    const faculty = await User.findById(credit.faculty).session(session);
-    if (!faculty) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({ success: false, message: 'Faculty not found' });
-    }
+    // verify faculty exists
+    const facultyId = credit.faculty;
+    const faculty = await User.findById(facultyId);
+    if (!faculty) return res.status(404).json({ success: false, message: 'Faculty not found' });
 
     const prevStatus = credit.status;
+    const updatePayload = {
+      status,
+      updatedAt: new Date().toISOString(),
+    };
+    if (typeof notes !== 'undefined') updatePayload.notes = notes;
 
-    // Only update credit document inside the transaction
-    credit.status = status;
-    if (typeof notes !== 'undefined') credit.notes = notes;
+    await Credit.update(id, updatePayload);
 
-    await credit.save({ session });
+    // fetch updated credit
+    const updated = await Credit.findById(id);
 
-    // commit transaction: the credit status change is now durable
-    await session.commitTransaction();
-    session.endSession();
-
-    // Recalculate faculty totals after the credit status change.
-    // recalcFacultyCredits reads Credit collection and writes User doc.
-    // It is executed outside the transaction (so it sees committed changes).
+    // Recalculate faculty totals (fire-and-wait)
     try {
       await recalcFacultyCredits(faculty._id);
     } catch (recalcErr) {
-      // Log the error but continue — credit status has been changed; totals can be retried.
       console.error('recalcFacultyCredits failed:', recalcErr);
     }
 
-    // Emit socket update (ensure emitSocket or io is available in this module)
-    emitSocket(req, 'credit:positive:update', { credit });
+    emitSocket(req, 'credit:positive:update', { credit: updated });
 
-    return res.json({ success: true, data: credit });
-  } catch (err) {
-    // Ensure transaction is aborted on error
-    try { await session.abortTransaction(); } catch (e) { /* ignore */ }
-    session.endSession();
-    next(err);
-  }
-}
-
-async function getPositiveCreditById(req, res, next) {
-  try {
-    const { id } = req.params;
-    const credit = await Credit.findById(id).populate('faculty', 'name facultyID email college department currentCredit creditsByYear').populate('creditTitle', 'title points type');
-    if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
-    if (credit.type !== 'positive') return res.status(400).json({ success: false, message: 'Not a positive credit' });
-    res.json({ success: true, data: credit });
+    return res.json({ success: true, data: updated });
   } catch (err) {
     next(err);
   }
 }
-
 
 /**
- * ADMIN: List all negative credits (paginated + filters)
+ * Get positive credit by id (Dynamo)
+ */
+async function getPositiveCreditById(req, res, next) {
+  try {
+    await ensureDb();
+
+    const { id } = req.params;
+    const credit = await Credit.findById(id);
+    if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
+    if (credit.type !== 'positive') return res.status(400).json({ success: false, message: 'Not a positive credit' });
+
+    // optionally fetch faculty info from mongoose to mimick populate
+    let facultyInfo = null;
+    if (credit.faculty && mongoose.isValidObjectId(credit.faculty)) {
+      const u = await User.findById(credit.faculty).select('name facultyID email college department currentCredit creditsByYear').lean();
+      facultyInfo = u || null;
+    }
+
+    // attach facultyInfo to response (like populate)
+    const resp = { ...credit };
+    resp.facultyPopulated = facultyInfo;
+
+    return res.json({ success: true, data: resp });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * ADMIN: List all negative credits (Dynamo, paginated + filters)
  * GET /api/v1/admin/credits/negative
- * Query: page, limit, academicYear, status, facultyId, sort, search
  */
 async function adminListNegativeCredits(req, res, next) {
   try {
+    await ensureDb();
+
     const {
       page = 1,
       limit = 20,
@@ -283,175 +409,186 @@ async function adminListNegativeCredits(req, res, next) {
       search
     } = req.query;
 
-    const filter = { type: 'negative' };
+    // Base filter
+    const baseFilter = { type: 'negative' };
+    if (academicYear && String(academicYear).trim().toLowerCase() !== 'all') baseFilter.academicYear = String(academicYear).trim();
+    if (facultyId) baseFilter.faculty = String(facultyId);
 
-    if (academicYear && String(academicYear).trim().toLowerCase() !== 'all') {
-      filter.academicYear = String(academicYear).trim();
-    }
+    // initial fetch
+    let items = await Credit.find(baseFilter);
 
+    // status filter
     if (status && String(status).trim().toLowerCase() !== 'all') {
       const s = String(status).trim().toLowerCase();
       const allowed = ['pending', 'approved', 'rejected', 'appealed'];
       if (!allowed.includes(s)) {
         return res.status(400).json({ success: false, message: `Invalid status. Allowed: ${allowed.join(', ')}` });
       }
-      filter.status = s;
+      items = items.filter(it => String(it.status || '').toLowerCase() === s);
     }
 
-    if (facultyId) {
-      if (!mongoose.isValidObjectId(facultyId)) {
-        return res.status(400).json({ success: false, message: 'Invalid facultyId' });
-      }
-      filter.faculty = facultyId;
-    }
-
+    // search filter
     if (search) {
-      const q = String(search).trim();
-      filter.$or = [
-        { title: { $regex: q, $options: 'i' } },
-        { notes: { $regex: q, $options: 'i' } },
-        { 'facultySnapshot.name': { $regex: q, $options: 'i' } },
-        { 'facultySnapshot.facultyID': { $regex: q, $options: 'i' } }
-      ];
+      const q = String(search).trim().toLowerCase();
+      items = items.filter(it => {
+        const title = String(it.title || '').toLowerCase();
+        const notes = String(it.notes || '').toLowerCase();
+        const fname = String(it.facultySnapshot?.name || '').toLowerCase();
+        const fid = String(it.facultySnapshot?.facultyID || '').toLowerCase();
+        return title.includes(q) || notes.includes(q) || fname.includes(q) || fid.includes(q);
+      });
     }
 
-    const skip = (Math.max(Number(page), 1) - 1) * Math.max(Number(limit), 1);
+    // sort
+    const desc = String(sort).startsWith('-');
+    const sortKey = desc ? sort.slice(1) : sort;
+    items.sort((a, b) => {
+      const va = a[sortKey] || '';
+      const vb = b[sortKey] || '';
+      return desc ? String(vb).localeCompare(String(va)) : String(va).localeCompare(String(vb));
+    });
 
-    const [total, items] = await Promise.all([
-      Credit.countDocuments(filter),
-      Credit.find(filter)
-        .sort(sort)
-        .skip(skip)
-        .limit(Math.max(Number(limit), 1))
-        .populate('faculty', 'name facultyID email college department')
-        .populate('issuedBy', 'name email role')
-        .populate('creditTitle', 'title points type')
-        .lean()
-    ]);
+    const total = items.length;
+    const skip = (Math.max(Number(page), 1) - 1) * Math.max(Number(limit), 1);
+    const paged = items.slice(skip, skip + Math.max(Number(limit), 1));
 
     return res.json({
       success: true,
       total,
       page: Number(page),
       limit: Number(limit),
-      items
+      items: paged,
     });
   } catch (err) {
-    return next(err);
-  }
-}
-
-/**
- * ADMIN: Get a single negative credit by id
- * GET /api/v1/admin/credits/negative/:id
- */
-async function adminGetNegativeCreditById(req, res, next) {
-  try {
-    const { id } = req.params;
-    if (!mongoose.isValidObjectId(id)) {
-      return res.status(400).json({ success: false, message: 'Invalid credit id' });
-    }
-
-    const credit = await Credit.findById(id)
-      .populate('faculty', 'name facultyID email college department')
-      .populate('issuedBy', 'name email role')
-      .populate('creditTitle', 'title points type')
-      .lean();
-
-    if (!credit) {
-      return res.status(404).json({ success: false, message: 'Negative credit not found' });
-    }
-
-    if (credit.type !== 'negative') {
-      return res.status(400).json({ success: false, message: 'Credit is not negative' });
-    }
-
-    return res.json({ success: true, data: credit });
-  } catch (err) {
-    return next(err);
-  }
-}
-
-/**
- * ADMIN: Get faculty (id and basic info) by negative credit id
- * GET /api/v1/admin/credits/negative/:id/faculty
- */
-async function adminGetFacultyByNegativeCreditId(req, res, next) {
-  try {
-    const { id } = req.params;
-    if (!mongoose.isValidObjectId(id)) {
-      return res.status(400).json({ success: false, message: 'Invalid credit id' });
-    }
-
-    const credit = await Credit.findById(id).select('faculty facultySnapshot type').lean();
-    if (!credit) {
-      return res.status(404).json({ success: false, message: 'Negative credit not found' });
-    }
-
-    if (credit.type && credit.type !== 'negative') {
-      return res.status(400).json({ success: false, message: 'Not a negative credit' });
-    }
-
-    // Try to return faculty snapshot first; fall back to User document lookup if needed
-    let facultyInfo = credit.facultySnapshot || null;
-    if (!facultyInfo || !facultyInfo.name) {
-      if (credit.faculty && mongoose.isValidObjectId(credit.faculty)) {
-        const user = await User.findById(credit.faculty).select('name facultyID email college department').lean();
-        facultyInfo = user || null;
-      }
-    }
-
-    return res.json({ success: true, data: { facultyId: credit.faculty, faculty: facultyInfo } });
-  } catch (err) {
-    return next(err);
-  }
-}
-
-async function adminListNegativeCreditAppeals(req, res, next) {
-  try {
-    const { page = 1, limit = 20, status, facultyId, academicYear, sort = '-appeal.createdAt' } = req.query;
-
-    const filter = { type: 'negative', 'appeal.by': { $exists: true } };
-    if (status) filter['appeal.status'] = status;
-    if (facultyId && mongoose.isValidObjectId(facultyId)) filter.faculty = facultyId;
-    if (academicYear && academicYear.toLowerCase() !== 'all') filter.academicYear = academicYear;
-
-    const skip = (Math.max(Number(page), 1) - 1) * Math.max(Number(limit), 1);
-
-    const [total, items] = await Promise.all([
-      Credit.countDocuments(filter),
-      Credit.find(filter)
-        .sort(sort)
-        .skip(skip)
-        .limit(Number(limit))
-        .populate('faculty', 'name facultyID email college department')
-        .populate('issuedBy', 'name email role')
-        .populate('appeal.by', 'name facultyID email')
-        .lean(),
-    ]);
-
-    res.json({ success: true, total, page: Number(page), limit: Number(limit), items });
-  } catch (err) {
-    console.error('adminListNegativeCreditAppeals error:', err);
     next(err);
   }
 }
 
+/**
+ * ADMIN: Get a single negative credit by id (Dynamo)
+ */
+async function adminGetNegativeCreditById(req, res, next) {
+  try {
+    await ensureDb();
 
+    const { id } = req.params;
+    // Accept flexible id but ensure present
+    if (!id) return res.status(400).json({ success: false, message: 'Invalid credit id' });
+
+    const credit = await Credit.findById(id);
+    if (!credit) return res.status(404).json({ success: false, message: 'Negative credit not found' });
+    if (credit.type !== 'negative') return res.status(400).json({ success: false, message: 'Credit is not negative' });
+
+    // Optionally fetch faculty (mongoose) and issuedBy details
+    let facultyInfo = null;
+    if (credit.faculty && mongoose.isValidObjectId(credit.faculty)) {
+      facultyInfo = await User.findById(credit.faculty).select('name facultyID email college department').lean();
+    }
+
+    const resp = { ...credit, facultyPopulated: facultyInfo };
+
+    return res.json({ success: true, data: resp });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * ADMIN: Get faculty (id and basic info) by negative credit id (Dynamo)
+ */
+async function adminGetFacultyByNegativeCreditId(req, res, next) {
+  try {
+    await ensureDb();
+
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ success: false, message: 'Invalid credit id' });
+
+    const credit = await Credit.findById(id);
+    if (!credit) return res.status(404).json({ success: false, message: 'Negative credit not found' });
+    if (credit.type && credit.type !== 'negative') return res.status(400).json({ success: false, message: 'Not a negative credit' });
+
+    // Use snapshot first
+    let facultyInfo = credit.facultySnapshot || null;
+    if ((!facultyInfo || !facultyInfo.name) && credit.faculty && mongoose.isValidObjectId(credit.faculty)) {
+      const user = await User.findById(credit.faculty).select('name facultyID email college department').lean();
+      facultyInfo = user || null;
+    }
+
+    return res.json({ success: true, data: { facultyId: credit.faculty, faculty: facultyInfo } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * ADMIN: List negative credit appeals (Dynamo)
+ */
+async function adminListNegativeCreditAppeals(req, res, next) {
+  try {
+    await ensureDb();
+
+    const { page = 1, limit = 20, status, facultyId, academicYear, sort = '-appeal.createdAt' } = req.query;
+
+    // Base: type negative and appeal.by exists
+    let items = await Credit.find({ type: 'negative' });
+    items = items.filter(it => it.appeal && it.appeal.by);
+
+    if (status) {
+      items = items.filter(it => String(it.appeal?.status || '').toLowerCase() === String(status).toLowerCase());
+    }
+
+    if (facultyId && mongoose.isValidObjectId(facultyId)) {
+      items = items.filter(it => String(it.faculty) === String(facultyId));
+    }
+
+    if (academicYear && String(academicYear).toLowerCase() !== 'all') {
+      items = items.filter(it => it.academicYear === academicYear);
+    }
+
+    // sort by nested field (simple lexical)
+    const desc = String(sort).startsWith('-');
+    const sortKey = desc ? sort.slice(1) : sort; // e.g. 'appeal.createdAt' or 'appeal.createdAt'
+    const keyParts = sortKey.split('.');
+    items.sort((a, b) => {
+      const va = keyParts.reduce((acc, k) => (acc ? acc[k] : undefined), a) || '';
+      const vb = keyParts.reduce((acc, k) => (acc ? acc[k] : undefined), b) || '';
+      return desc ? String(vb).localeCompare(String(va)) : String(va).localeCompare(String(vb));
+    });
+
+    const total = items.length;
+    const skip = (Math.max(Number(page), 1) - 1) * Math.max(Number(limit), 1);
+    const paged = items.slice(skip, skip + Math.max(Number(limit), 1));
+
+    return res.json({ success: true, total, page: Number(page), limit: Number(limit), items: paged });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Get negative appeals (Dynamo)
+ */
 async function getNegativeAppeals(req, res) {
   try {
-    // Fetch all credits where the type is 'negative' and appeal status is 'pending', 'accepted', or 'rejected'
-    const negativeAppeals = await Credit.find({
-      type: 'negative',
-      'appeal.status': { $in: ['pending', 'accepted', 'rejected'] }
-    }).populate('faculty', 'name college department') // Populating faculty info to show relevant details
-      .populate('appeal.by', 'name email') // Populating appeal's user info
-      .select('faculty title points categories proofUrl appeal status createdAt');
+    await ensureDb();
+
+    const negativeAppeals = (await Credit.find({ type: 'negative' }))
+      .filter(c => c.appeal && ['pending', 'accepted', 'rejected'].includes(String(c.appeal.status || '').toLowerCase()))
+      .map(c => ({
+        faculty: c.facultySnapshot || null,
+        creditId: c._id,
+        title: c.title,
+        points: c.points,
+        categories: c.categories,
+        proofUrl: c.proofUrl,
+        appeal: c.appeal,
+        status: c.status,
+        createdAt: c.createdAt,
+      }));
 
     if (negativeAppeals.length === 0) {
       return res.status(404).json({ message: 'No negative appeals found' });
     }
-
     return res.status(200).json({ negativeAppeals });
   } catch (err) {
     console.error(err);
@@ -459,22 +596,17 @@ async function getNegativeAppeals(req, res) {
   }
 }
 
-
 /**
- * Admin: Get a single appeal by negative credit ID
- * GET /api/v1/admin/credits/negative/:creditId/appeal
+ * ADMIN: Get a single appeal by negative credit ID (Dynamo)
  */
 async function adminGetAppealByCreditId(req, res, next) {
   try {
+    await ensureDb();
+
     const { creditId } = req.params;
-    if (!mongoose.isValidObjectId(creditId)) return res.status(400).json({ success: false, message: 'Invalid creditId' });
+    if (!creditId) return res.status(400).json({ success: false, message: 'Invalid creditId' });
 
-    const credit = await Credit.findById(creditId)
-      .populate('faculty', 'name facultyID email college department')
-      .populate('issuedBy', 'name email role')
-      .populate('appeal.by', 'name facultyID email')
-      .lean();
-
+    const credit = await Credit.findById(creditId);
     if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
     if (!credit.appeal || !credit.appeal.by) return res.status(404).json({ success: false, message: 'No appeal found for this credit' });
 
@@ -485,55 +617,55 @@ async function adminGetAppealByCreditId(req, res, next) {
 }
 
 /**
- * Admin: Update appeal status
- * PUT /api/v1/admin/credits/negative/:creditId/appeal
+ * ADMIN: Update appeal status (Dynamo)
  * Body: { status: 'accepted' | 'rejected', notes: optional }
  */
 async function adminUpdateAppealStatus(req, res, next) {
-  const session = await mongoose.startSession();
-  session.startTransaction();
   try {
+    await ensureDb();
+
     const { creditId } = req.params;
     const { status, notes } = req.body;
 
     const allowedStatuses = ['accepted', 'rejected'];
     if (!allowedStatuses.includes(status)) return res.status(400).json({ success: false, message: `Invalid status. Allowed: ${allowedStatuses.join(', ')}` });
 
-    const credit = await Credit.findById(creditId).session(session);
-    if (!credit) {
-      await session.abortTransaction();
-      return res.status(404).json({ success: false, message: 'Credit not found' });
-    }
-    if (!credit.appeal || !credit.appeal.by) {
-      await session.abortTransaction();
-      return res.status(400).json({ success: false, message: 'No appeal found for this credit' });
-    }
+    const credit = await Credit.findById(creditId);
+    if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
 
-    credit.appeal.status = status;
-    credit.notes = notes || credit.notes;
+    if (!credit.appeal || !credit.appeal.by) return res.status(400).json({ success: false, message: 'No appeal found for this credit' });
 
-    // Optional: If appeal accepted, mark credit as pending re-review
+    // Update appeal object and credit status if needed
+    const newAppeal = {
+      ...credit.appeal,
+      status,
+      updatedAt: new Date().toISOString(),
+      notes: notes || credit.appeal.notes,
+    };
+
+    const updatePayload = {
+      appeal: newAppeal,
+      notes: notes || credit.notes || undefined,
+      updatedAt: new Date().toISOString(),
+    };
+
+    // If appeal accepted, set credit.status to 'pending' for re-review (preserve previous logic)
     if (status === 'accepted' && credit.status !== 'pending') {
-      credit.status = 'pending';
+      updatePayload.status = 'pending';
     }
 
-    await credit.save({ session });
-    await session.commitTransaction();
-    session.endSession();
+    await Credit.update(creditId, updatePayload);
+
+    const updated = await Credit.findById(creditId);
 
     // Emit socket event if needed
-    const io = req.app?.locals?.io;
-    if (io) io.emit('credit:appeal:update', { creditId: credit._id, appeal: credit.appeal });
+    emitSocket(req, 'credit:appeal:update', { creditId: updated._id, appeal: updated.appeal });
 
-    return res.json({ success: true, data: credit });
+    return res.json({ success: true, data: updated });
   } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
     next(err);
   }
 }
-
-
 
 module.exports = {
   createCreditTitle,
@@ -551,5 +683,5 @@ module.exports = {
   adminListNegativeCreditAppeals,
   adminGetAppealByCreditId,
   adminUpdateAppealStatus,
-  getNegativeAppeals
+  getNegativeAppeals,
 };

@@ -1,102 +1,116 @@
 const bcrypt = require('bcryptjs');
-const User = require('../Models/User');
+const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
+const {
+  DynamoDBDocumentClient,
+  GetCommand,
+  PutCommand,
+  UpdateCommand,
+  DeleteCommand,
+  ScanCommand,
+  QueryCommand,
+} = require("@aws-sdk/lib-dynamodb");
 const { handleProfileImageUpload } = require('../utils/uploadProfileImage');
+const { generateFacultyID, generateApiKey } = require('../utils/generateID');
+
+const ddbClient = new DynamoDBClient({ region: process.env.AWS_REGION });
+const ddbDocClient = DynamoDBDocumentClient.from(ddbClient);
+const TABLE_NAME = process.env.DYNAMO_DB_USERS;
 
 /**
  * Get current user profile
  */
 async function getProfile(req, res, next) {
   try {
-    if (!req.user)
-      return res.status(401).json({ success: false, message: 'Unauthorized' });
-    res.json({ success: true, data: req.user });
+    if (!req.user) return res.status(401).json({ success: false, message: 'Unauthorized' });
+
+    const params = {
+      TableName: TABLE_NAME,
+      Key: { id: req.user.id },
+    };
+
+    const result = await ddbDocClient.send(new GetCommand(params));
+    res.json({ success: true, data: result.Item || null });
   } catch (err) {
     next(err);
   }
 }
 
 /**
- * Update current user profile (with profile image upload)
+ * Update current user profile
  */
 async function updateProfile(req, res, next) {
   try {
-    if (!req.user)
-      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    if (!req.user) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
-    const allowedFields = [
-      'name',
-      'email',
-      'phone',
-      'department',
-      'prefix',
-      'roleCategory',
-      'designation'
-    ];
+    const allowedFields = ['name', 'email', 'phone', 'department', 'prefix', 'roleCategory', 'designation'];
     const updates = {};
 
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) updates[field] = req.body[field];
     }
 
-    // Handle profile image upload
     if (req.files?.profileImage) {
       const file = req.files.profileImage;
       updates.profileImage = await handleProfileImageUpload(file);
     }
 
-    // Check if email is being updated
+    // Check if email exists (scan DynamoDB for email)
     if (updates.email && updates.email !== req.user.email) {
-      const exists = await User.findOne({ email: updates.email });
-      if (exists) {
-        return res.status(400).json({ success: false, message: 'Email already in use' });
-      }
+      const scanParams = {
+        TableName: TABLE_NAME,
+        FilterExpression: 'email = :email',
+        ExpressionAttributeValues: { ':email': updates.email },
+      };
+      const scanResult = await ddbDocClient.send(new ScanCommand(scanParams));
+      if (scanResult.Count > 0) return res.status(400).json({ success: false, message: 'Email already in use' });
     }
 
-    const updated = await User.findByIdAndUpdate(
-      req.user._id,
-      { $set: updates },
-      { new: true, runValidators: true, select: '-password' }
-    );
+    // Build UpdateExpression dynamically
+    const updateKeys = Object.keys(updates);
+    const updateExpression = `SET ${updateKeys.map((k, i) => `#${k} = :${k}`).join(', ')}`;
+    const expressionAttributeNames = Object.fromEntries(updateKeys.map(k => [`#${k}`, k]));
+    const expressionAttributeValues = Object.fromEntries(updateKeys.map(k => [`:${k}`, updates[k]]));
 
-    res.json({ success: true, data: updated });
+    const params = {
+      TableName: TABLE_NAME,
+      Key: { id: req.user.id },
+      UpdateExpression: updateExpression,
+      ExpressionAttributeNames: expressionAttributeNames,
+      ExpressionAttributeValues: expressionAttributeValues,
+      ReturnValues: "ALL_NEW",
+    };
+
+    const result = await ddbDocClient.send(new UpdateCommand(params));
+    res.json({ success: true, data: result.Attributes });
   } catch (err) {
     next(err);
   }
 }
 
 /**
- * Admin-only: create user (with optional profile image upload)
+ * Admin: create user
  */
 async function adminCreateUser(req, res, next) {
   try {
-    const {
-      name,
-      email,
-      password,
-      college,
-      department,
-      role,
-      prefix,
-      roleCategory,
-      designation
-    } = req.body;
-
+    const { name, email, password, college, department, role, prefix, roleCategory, designation } = req.body;
     if (!name || !email || !college || !password || !roleCategory || !designation)
-      return res.status(400).json({
-        success: false,
-        message: 'Missing required fields (include roleCategory & designation)',
-      });
+      return res.status(400).json({ success: false, message: 'Missing required fields' });
 
-    const exists = await User.findOne({ email });
-    if (exists)
-      return res.status(400).json({ success: false, message: 'User already exists' });
+    // Check if email exists
+    const scanParams = {
+      TableName: TABLE_NAME,
+      FilterExpression: 'email = :email',
+      ExpressionAttributeValues: { ':email': email },
+    };
+    const scanResult = await ddbDocClient.send(new ScanCommand(scanParams));
+    if (scanResult.Count > 0) return res.status(400).json({ success: false, message: 'User already exists' });
 
     const hashed = await bcrypt.hash(password, 10);
-    const { generateFacultyID, generateApiKey } = require('../utils/generateID');
     const facultyID = generateFacultyID(college);
     const apiKey = generateApiKey();
 
     const userData = {
+      id: facultyID,
       name,
       email,
       password: hashed,
@@ -108,140 +122,18 @@ async function adminCreateUser(req, res, next) {
       roleCategory,
       designation,
       role: role === 'admin' ? 'admin' : 'faculty',
+      isActive: true,
+      createdAt: new Date().toISOString(),
     };
 
-    // Handle profile image upload
     if (req.files?.profileImage) {
       const file = req.files.profileImage;
       userData.profileImage = await handleProfileImageUpload(file);
     }
 
-    const user = await User.create(userData);
-    res.status(201).json({ success: true, data: user });
-  } catch (err) {
-    next(err);
-  }
-}
-
-/**
- * Admin: list users with filters
- */
-const escapeRegExp = (str = '') =>
-  str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-async function listUsers(req, res, next) {
-  try {
-    const {
-      page = 1,
-      limit = 20,
-      q,
-      department,
-      college,
-      role,
-      isActive,
-      minCredit,
-      maxCredit,
-      year,
-      minCreditYear,
-      maxCreditYear,
-      roleCategory,
-      designation,
-      sortBy = 'createdAt',
-      sortOrder = 'desc',
-    } = req.query;
-
-    const filter = {};
-
-    if (q) {
-      const qRegex = new RegExp(escapeRegExp(q), 'i');
-      filter.$or = [{ name: qRegex }, { facultyID: qRegex }, { email: qRegex }];
-    }
-
-    const parseListToRegexArray = (val) =>
-      val
-        ?.split(',')
-        .map((s) => new RegExp(`^${escapeRegExp(s.trim())}$`, 'i'))
-        .filter(Boolean);
-
-    const deptArr = parseListToRegexArray(department);
-    if (deptArr?.length) filter.department = { $in: deptArr };
-
-    const collegeArr = parseListToRegexArray(college);
-    if (collegeArr?.length) filter.college = { $in: collegeArr };
-
-    const roleArr = parseListToRegexArray(role);
-    if (roleArr?.length) filter.role = { $in: roleArr };
-
-    const categoryArr = parseListToRegexArray(roleCategory);
-    if (categoryArr?.length) filter.roleCategory = { $in: categoryArr };
-
-    const desigArr = parseListToRegexArray(designation);
-    if (desigArr?.length) filter.designation = { $in: desigArr };
-
-    if (typeof isActive !== 'undefined') {
-      const val = String(isActive).toLowerCase();
-      if (val === 'true' || val === '1') filter.isActive = true;
-      else if (val === 'false' || val === '0') filter.isActive = false;
-    }
-
-    if (minCredit || maxCredit) {
-      filter.currentCredit = {};
-      if (minCredit) filter.currentCredit.$gte = Number(minCredit);
-      if (maxCredit) filter.currentCredit.$lte = Number(maxCredit);
-    }
-
-    if (year) {
-      const field = `creditsByYear.${year}`;
-      const minY = Number(minCreditYear);
-      const maxY = Number(maxCreditYear);
-      if (!Number.isNaN(minY) || !Number.isNaN(maxY)) {
-        filter[field] = {};
-        if (!Number.isNaN(minY)) filter[field].$gte = minY;
-        if (!Number.isNaN(maxY)) filter[field].$lte = maxY;
-      } else {
-        filter[field] = { $exists: true };
-      }
-    }
-
-    const pageNum = Math.max(1, Number(page) || 1);
-    const perPage = Math.max(1, Math.min(100, Number(limit) || 20));
-    const skip = (pageNum - 1) * perPage;
-
-    const allowedSortOrder = sortOrder.toLowerCase() === 'asc' ? 1 : -1;
-    const safeSortFields = new Set([
-      'createdAt',
-      'name',
-      'facultyID',
-      'email',
-      'currentCredit',
-      'college',
-      'department',
-      'role',
-      'isActive',
-      'roleCategory',
-      'designation',
-    ]);
-    const sortField = safeSortFields.has(sortBy) ? sortBy : 'createdAt';
-    const sort = { [sortField]: allowedSortOrder };
-
-    const [total, items] = await Promise.all([
-      User.countDocuments(filter),
-      User.find(filter)
-        .skip(skip)
-        .limit(perPage)
-        .sort(sort)
-        .select('-password'),
-    ]);
-
-    res.json({
-      success: true,
-      total,
-      page: pageNum,
-      pages: Math.ceil(total / perPage),
-      limit: perPage,
-      itemsCount: items.length,
-      items,
-    });
+    await ddbDocClient.send(new PutCommand({ TableName: TABLE_NAME, Item: userData }));
+    delete userData.password; // don't return password
+    res.status(201).json({ success: true, data: userData });
   } catch (err) {
     next(err);
   }
@@ -252,10 +144,11 @@ async function listUsers(req, res, next) {
  */
 async function getUserById(req, res, next) {
   try {
-    const user = await User.findById(req.params.id).select('-password');
-    if (!user)
-      return res.status(404).json({ success: false, message: 'User not found' });
-    res.json({ success: true, data: user });
+    const params = { TableName: TABLE_NAME, Key: { id: req.params.id } };
+    const result = await ddbDocClient.send(new GetCommand(params));
+    if (!result.Item) return res.status(404).json({ success: false, message: 'User not found' });
+    delete result.Item.password;
+    res.json({ success: true, data: result.Item });
   } catch (err) {
     next(err);
   }
@@ -266,9 +159,8 @@ async function getUserById(req, res, next) {
  */
 async function deleteUser(req, res, next) {
   try {
-    const deleted = await User.findByIdAndDelete(req.params.id);
-    if (!deleted)
-      return res.status(404).json({ success: false, message: 'User not found' });
+    const params = { TableName: TABLE_NAME, Key: { id: req.params.id } };
+    await ddbDocClient.send(new DeleteCommand(params));
     res.json({ success: true, message: 'User deleted successfully' });
   } catch (err) {
     next(err);
@@ -276,50 +168,104 @@ async function deleteUser(req, res, next) {
 }
 
 /**
- * Admin: update user (with GitHub image upload)
+ * Admin: update user
  */
 async function adminUpdateUser(req, res, next) {
   try {
-    const allowedFields = [
-      'name',
-      'email',
-      'phone',
-      'department',
-      'college',
-      'role',
-      'isActive',
-      'prefix',
-      'roleCategory',
-      'designation',
-    ];
-    
+    const allowedFields = ['name', 'email', 'phone', 'department', 'college', 'role', 'isActive', 'prefix', 'roleCategory', 'designation'];
     const updates = {};
-
-    // Collect fields from request body
     for (const field of allowedFields) {
-      if (req.body[field] !== undefined) {
-        updates[field] = req.body[field];
-      }
+      if (req.body[field] !== undefined) updates[field] = req.body[field];
     }
 
-    // Handle profile image upload
     if (req.files?.profileImage) {
-      const file = req.files.profileImage;
-      updates.profileImage = await handleProfileImageUpload(file);
+      updates.profileImage = await handleProfileImageUpload(req.files.profileImage);
     }
 
-    // Update user in database
-    const updated = await User.findByIdAndUpdate(
-      req.params.id,
-      { $set: updates },
-      { new: true, runValidators: true, select: '-password' }
-    );
+    if (Object.keys(updates).length === 0) return res.status(400).json({ success: false, message: 'No updates provided' });
 
-    if (!updated) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+    const updateKeys = Object.keys(updates);
+    const updateExpression = `SET ${updateKeys.map((k, i) => `#${k} = :${k}`).join(', ')}`;
+    const expressionAttributeNames = Object.fromEntries(updateKeys.map(k => [`#${k}`, k]));
+    const expressionAttributeValues = Object.fromEntries(updateKeys.map(k => [`:${k}`, updates[k]]));
+
+    const params = {
+      TableName: TABLE_NAME,
+      Key: { id: req.params.id },
+      UpdateExpression: updateExpression,
+      ExpressionAttributeNames: expressionAttributeNames,
+      ExpressionAttributeValues: expressionAttributeValues,
+      ReturnValues: "ALL_NEW",
+    };
+
+    const result = await ddbDocClient.send(new UpdateCommand(params));
+    if (!result.Attributes) return res.status(404).json({ success: false, message: 'User not found' });
+    delete result.Attributes.password;
+    res.json({ success: true, data: result.Attributes });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Admin: list users (basic filtering, DynamoDB scan)
+ */
+async function listUsers(req, res, next) {
+  try {
+    const { q, department, college, role, isActive } = req.query;
+
+    let filterExpressions = [];
+    let expressionAttributeValues = {};
+    let expressionAttributeNames = {};
+
+    if (q) {
+      filterExpressions.push('contains(#name, :q) OR contains(email, :q) OR contains(facultyID, :q)');
+      expressionAttributeValues[':q'] = q;
+      expressionAttributeNames['#name'] = 'name';
     }
 
-    res.json({ success: true, data: updated });
+    if (department) {
+      filterExpressions.push('#department = :department');
+      expressionAttributeValues[':department'] = department;
+      expressionAttributeNames['#department'] = 'department';
+    }
+
+    if (college) {
+      filterExpressions.push('#college = :college');
+      expressionAttributeValues[':college'] = college;
+      expressionAttributeNames['#college'] = 'college';
+    }
+
+    if (role) {
+      filterExpressions.push('#role = :role');
+      expressionAttributeValues[':role'] = role;
+      expressionAttributeNames['#role'] = 'role';
+    }
+
+    if (typeof isActive !== 'undefined') {
+      const activeBool = String(isActive).toLowerCase() === 'true';
+      filterExpressions.push('#isActive = :isActive');
+      expressionAttributeValues[':isActive'] = activeBool;
+      expressionAttributeNames['#isActive'] = 'isActive';
+    }
+
+    const params = {
+      TableName: TABLE_NAME,
+    };
+
+    if (filterExpressions.length > 0) {
+      params.FilterExpression = filterExpressions.join(' AND ');
+      params.ExpressionAttributeValues = expressionAttributeValues;
+      params.ExpressionAttributeNames = expressionAttributeNames;
+    }
+
+    const result = await ddbDocClient.send(new ScanCommand(params));
+    const items = result.Items.map(item => {
+      delete item.password;
+      return item;
+    });
+
+    res.json({ success: true, total: items.length, items });
   } catch (err) {
     next(err);
   }
