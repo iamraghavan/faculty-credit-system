@@ -1,0 +1,673 @@
+{
+  "CreditTitles": [
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68e29d54933483170dded6c0"
+          },
+          "title": {
+            "S": "Excellent Research Paper"
+          },
+          "points": {
+            "N": "10"
+          },
+          "type": {
+            "S": "positive"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Awarded for publishing high-quality research paper"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-05T16:31:16.593Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-15T12:52:53.859Z"
+          },
+          "__v": {
+            "N": "0"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68edba4b171cee0c927329bc"
+          },
+          "title": {
+            "S": "Class Timing Issue"
+          },
+          "points": {
+            "N": "7"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "A Staff Going to class delayed"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-14T02:49:47.766Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-14T09:05:38.096Z"
+          },
+          "__v": {
+            "N": "0"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68edf5d13df8c7bac9b235ad"
+          },
+          "title": {
+            "S": "Project guidance"
+          },
+          "points": {
+            "N": "10"
+          },
+          "type": {
+            "S": "positive"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Awarded for Guiding student for high-quality porjects"
+          },
+          "isActive": {
+            "BOOL": false
+          },
+          "createdAt": {
+            "S": "2025-10-14T07:03:45.144Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-14T09:05:15.25Z"
+          },
+          "__v": {
+            "N": "0"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c3a"
+          },
+          "title": {
+            "S": "Leaving the examination hall or using a personal phone during invigilation"
+          },
+          "points": {
+            "N": "5"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Faculty misbehavior during invigilation"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.713Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.713Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c3d"
+          },
+          "title": {
+            "S": "Missing attendance entries"
+          },
+          "points": {
+            "N": "2"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Attendance not recorded"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c3f"
+          },
+          "title": {
+            "S": "Incorrect mark entries in the ERP system"
+          },
+          "points": {
+            "N": "10"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Marks entered incorrectly in ERP"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c44"
+          },
+          "title": {
+            "S": "Misuse of college resources"
+          },
+          "points": {
+            "N": "5"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "College resources misused"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c4b"
+          },
+          "title": {
+            "S": "Incomplete or inaccurate files/documents"
+          },
+          "points": {
+            "N": "3"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Files or documents incomplete or inaccurate"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c61"
+          },
+          "title": {
+            "S": "Outstanding Contribution to Accreditation Activities (NAAC/NBA/NIRF)"
+          },
+          "points": {
+            "N": "20"
+          },
+          "type": {
+            "S": "positive"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Outstanding contribution to accreditation activities"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c3b"
+          },
+          "title": {
+            "S": "Incorrect grades due to careless evaluation of answer sheets"
+          },
+          "points": {
+            "N": "10"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Careless grading by faculty"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.713Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.713Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c3c"
+          },
+          "title": {
+            "S": "Failure to enter marks/assessments into the ERP system"
+          },
+          "points": {
+            "N": "10"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Marks not entered into ERP"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.713Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.713Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c51"
+          },
+          "title": {
+            "S": "Consistently High Student Feedback (per subject, per semester) 4.26–4.50"
+          },
+          "points": {
+            "N": "6"
+          },
+          "type": {
+            "S": "positive"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Student feedback 4.26–4.50"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c57"
+          },
+          "title": {
+            "S": "Guiding Student Projects leading to Patent/Conference/Journal"
+          },
+          "points": {
+            "N": "10"
+          },
+          "type": {
+            "S": "positive"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Guided student projects resulting in patents/papers/journals"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c5a"
+          },
+          "title": {
+            "S": "Completing an Industry Consultancy Project (Revenue-based)"
+          },
+          "points": {
+            "N": "15"
+          },
+          "type": {
+            "S": "positive"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Completed industry consultancy project"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c5f"
+          },
+          "title": {
+            "S": "Organizing Industry-Led Training via CSR Initiatives"
+          },
+          "points": {
+            "N": "2"
+          },
+          "type": {
+            "S": "positive"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Organized industry-led training via CSR initiatives"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c62"
+          },
+          "title": {
+            "S": "Alumni Referral (Batch: 1995–2015)"
+          },
+          "points": {
+            "N": "1"
+          },
+          "type": {
+            "S": "positive"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Referred alumni from 1995–2015"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c39"
+          },
+          "title": {
+            "S": "Failure to use English as the medium of instruction"
+          },
+          "points": {
+            "N": "5"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Faculty did not use English as the medium of instruction"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.713Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.713Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c41"
+          },
+          "title": {
+            "S": "Uninformed or unapproved leave (faculty members)"
+          },
+          "points": {
+            "N": "5"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Leave taken without approval"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c46"
+          },
+          "title": {
+            "S": "Unprofessional behaviour towards students or colleagues"
+          },
+          "points": {
+            "N": "10"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Faculty behaved unprofessionally"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c4d"
+          },
+          "title": {
+            "S": "Non-participation in assigned accreditation activities (cadre-based)"
+          },
+          "points": {
+            "N": "3"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Did not participate in assigned accreditation activities"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    }
+  ]
+}

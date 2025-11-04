@@ -1,0 +1,664 @@
+{
+  "CreditTitles": [
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c54"
+          },
+          "title": {
+            "S": "Achieving High Pass Rates (per course, per semester)"
+          },
+          "points": {
+            "N": "15"
+          },
+          "type": {
+            "S": "positive"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "High pass rates per semester (II ≥80%, III ≥90%, IV ≥95%)"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c5e"
+          },
+          "title": {
+            "S": "Developing & Implementing New Value-Added Courses or Labs"
+          },
+          "points": {
+            "N": "10"
+          },
+          "type": {
+            "S": "positive"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Developed and implemented value-added courses/labs"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c3e"
+          },
+          "title": {
+            "S": "Incorrect attendance entries in the ERP system"
+          },
+          "points": {
+            "N": "2"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Attendance recorded incorrectly in ERP"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c52"
+          },
+          "title": {
+            "S": "Consistently High Student Feedback (per subject, per semester) 4.51–4.75"
+          },
+          "points": {
+            "N": "8"
+          },
+          "type": {
+            "S": "positive"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Student feedback 4.51–4.75"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c5d"
+          },
+          "title": {
+            "S": "Mentoring 20+ students through NPTEL (verified completion)"
+          },
+          "points": {
+            "N": "10"
+          },
+          "type": {
+            "S": "positive"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Mentored 20+ students through NPTEL"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c45"
+          },
+          "title": {
+            "S": "Breach of confidentiality or privacy"
+          },
+          "points": {
+            "N": "10"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Confidentiality or privacy breached"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c48"
+          },
+          "title": {
+            "S": "Consistently low student feedback (below defined threshold)"
+          },
+          "points": {
+            "N": "10"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Student feedback consistently low"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c4a"
+          },
+          "title": {
+            "S": "Late submission of reports, files, or documentation"
+          },
+          "points": {
+            "N": "5"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Reports submitted late"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c55"
+          },
+          "title": {
+            "S": "Mentoring students/teams to win major external technical competitions (National/International)"
+          },
+          "points": {
+            "N": "20"
+          },
+          "type": {
+            "S": "positive"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Mentored teams to win external competitions"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c56"
+          },
+          "title": {
+            "S": "Organizing Internship/Placement in Dream/Super Dream Companies"
+          },
+          "points": {
+            "N": "5"
+          },
+          "type": {
+            "S": "positive"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Internship/Placement organized"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c5c"
+          },
+          "title": {
+            "S": "Earning a Recognized High-Value Certification"
+          },
+          "points": {
+            "N": "15"
+          },
+          "type": {
+            "S": "positive"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Earned high-value certification like AWS, PMP, NPTEL Elite+Gold"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c42"
+          },
+          "title": {
+            "S": "Failure to perform assigned duties or refusal to take responsibility without valid reason"
+          },
+          "points": {
+            "N": "5"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Faculty did not perform assigned duties"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c43"
+          },
+          "title": {
+            "S": "Violation of the established dress code"
+          },
+          "points": {
+            "N": "5"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Dress code violation"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c47"
+          },
+          "title": {
+            "S": "Inadequate classroom control or poor class management"
+          },
+          "points": {
+            "N": "5"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Classroom management was poor"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c4f"
+          },
+          "title": {
+            "S": "Inadequate documentation or student mentoring"
+          },
+          "points": {
+            "N": "5"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Documentation or mentoring inadequate"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c5b"
+          },
+          "title": {
+            "S": "Obtaining Granted IPR (Patent/Design)"
+          },
+          "points": {
+            "N": "15"
+          },
+          "type": {
+            "S": "positive"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Obtained granted IPR (points may be divided among inventors)"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c49"
+          },
+          "title": {
+            "S": "Failure to report student misconduct"
+          },
+          "points": {
+            "N": "10"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Student misconduct not reported"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c4c"
+          },
+          "title": {
+            "S": "Leaving campus during college hours without proper permission"
+          },
+          "points": {
+            "N": "5"
+          },
+          "type": {
+            "S": "negative"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Faculty left campus without permission"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c59"
+          },
+          "title": {
+            "S": "Publishing in Tier-1 Journals (Q1/Q2, High Impact, Highly Cited)"
+          },
+          "points": {
+            "N": "25"
+          },
+          "type": {
+            "S": "positive"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Published in Tier-1 Journals"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "_id": {
+            "S": "68f9a4524639e05acc470c60"
+          },
+          "title": {
+            "S": "Conducting Advanced Workshops/FDPs as Resource Person (for external faculty)"
+          },
+          "points": {
+            "N": "5"
+          },
+          "type": {
+            "S": "positive"
+          },
+          "createdBy": {
+            "S": "68ec38e5959f30b26e2e15e6"
+          },
+          "description": {
+            "S": "Conducted workshops/FDPs as resource person"
+          },
+          "isActive": {
+            "BOOL": true
+          },
+          "createdAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          },
+          "updatedAt": {
+            "S": "2025-10-23T03:43:14.714Z"
+          }
+        }
+      }
+    }
+  ]
+}
