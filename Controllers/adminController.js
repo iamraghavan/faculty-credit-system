@@ -38,30 +38,53 @@ const emitSocket = (req, event, payload) => {
 async function handleFileUpload(file, folder) {
   if (!file) return {};
 
-  const tmpPath = file.path;
+  // prefer a sanitized filename, but handle both memory & disk multer storages
   const originalName = file.originalname || 'upload';
   const safeName = path.basename(originalName).replace(/[^\w.\-() ]+/g, '_').slice(0, 200);
   const destPath = `${folder}/${Date.now()}_${safeName}`;
 
+  // If using memoryStorage, multer provides file.buffer
+  const isBuffer = Buffer.isBuffer(file.buffer);
+  const tmpPath = file.path; // may be undefined if memoryStorage is used
+
   if (!process.env.GITHUB_TOKEN || !process.env.ASSET_GH_REPO || !process.env.ASSET_GH_OWNER) {
-    try { fs.unlinkSync(tmpPath); } catch (e) {}
+    // try to cleanup only if there's a real tmpPath on disk
+    if (tmpPath && typeof tmpPath === 'string') {
+      try { fs.unlinkSync(tmpPath); } catch (e) { /* ignore */ }
+    }
     throw new Error('GitHub upload not configured. Set ASSET_GH_OWNER, ASSET_GH_REPO, and GITHUB_TOKEN.');
   }
 
   try {
-    const proofUrl = await uploadFileToGitHub(tmpPath, destPath);
-    try { fs.unlinkSync(tmpPath); } catch (e) {}
+    let proofUrl;
+    if (isBuffer) {
+      // Use buffer upload helper (does not require a disk path)
+      proofUrl = await uploadFileToGitHubBuffer(file.buffer, destPath);
+    } else if (tmpPath && typeof tmpPath === 'string') {
+      // Disk-based multer -> upload by path
+      proofUrl = await uploadFileToGitHub(tmpPath, destPath);
+      // cleanup the temporary file after upload
+      try { fs.unlinkSync(tmpPath); } catch (e) { /* ignore */ }
+    } else {
+      // Neither buffer nor tmp path -> maybe client didn't send file correctly
+      throw new Error('Uploaded file missing buffer and path (multer storage mismatch).');
+    }
+
     return {
       proofUrl,
       proofMeta: {
         originalName,
-        size: file.size,
+        size: file.size || (file.buffer ? file.buffer.length : undefined),
         mimeType: file.mimetype,
       },
     };
   } catch (err) {
-    try { fs.unlinkSync(tmpPath); } catch (e) {}
-    throw new Error('Failed to upload file to GitHub: ' + err.message);
+    // cleanup only if we have a tmpPath
+    if (tmpPath && typeof tmpPath === 'string') {
+      try { fs.unlinkSync(tmpPath); } catch (e) { /* ignore */ }
+    }
+    // rethrow with clearer message
+    throw new Error('Failed to upload file to GitHub: ' + (err && err.message ? err.message : String(err)));
   }
 }
 
