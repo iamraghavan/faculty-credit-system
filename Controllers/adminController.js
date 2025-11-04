@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { recalcFacultyCredits } = require('../utils/calculateCredits');
-const { uploadFileToGitHub } = require('../utils/githubUpload');
+const { uploadFileToGitHub , uploadFileToGitHubBuffer} = require('../utils/githubUpload');
 const { connectDB } = require('../config/db');
 
 /**

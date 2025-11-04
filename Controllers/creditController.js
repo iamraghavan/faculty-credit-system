@@ -3,7 +3,7 @@
 const Credit = require('../Models/Credit');
 const User = require('../Models/User'); // assuming this is still mongoose-backed
 const CreditTitle = require('../Models/CreditTitle');
-const { uploadFileToGitHub } = require('../utils/githubUpload');
+const { uploadFileToGitHub, uploadFileToGitHubBuffer } = require('../utils/githubUpload');
 const fs = require('fs');
 const path = require('path');
 const { sendEmail } = require('../utils/email');
