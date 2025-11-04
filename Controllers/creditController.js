@@ -29,31 +29,55 @@ async function ensureDb() {
 async function handleFileUpload(file, folder) {
   if (!file) return {};
 
-  const tmpPath = file.path;
-  const originalName = file.originalname || 'upload';
+  const hasBuffer = !!file.buffer;
+  const tmpPath = file.path; // may be undefined for memoryStorage
+  const originalName = file.originalname || `upload-${Date.now()}`;
   const safeName = path.basename(originalName).replace(/[^\w.\-() ]+/g, '_').slice(0, 200);
   const destPath = `${folder}/${Date.now()}_${safeName}`;
 
   if (!process.env.GITHUB_TOKEN || !process.env.ASSET_GH_REPO || !process.env.ASSET_GH_OWNER) {
-    // remove tmp file if present
-    try { fs.unlinkSync(tmpPath); } catch (e) {}
+    // if there's a tmpPath on disk, attempt to remove it
+    if (tmpPath) {
+      try { fs.unlinkSync(tmpPath); } catch (e) { /* ignore */ }
+    }
     throw new Error('GitHub upload not configured. Set ASSET_GH_OWNER, ASSET_GH_REPO, and GITHUB_TOKEN.');
   }
 
   try {
-    const proofUrl = await uploadFileToGitHub(tmpPath, destPath);
-    try { fs.unlinkSync(tmpPath); } catch (e) {}
+    let proofUrl;
+    if (hasBuffer) {
+      // Use your buffer-based uploader
+      // uploadFileToGitHubBuffer(buffer, destPath, filename?) — adapt signature if needed
+      proofUrl = await uploadFileToGitHubBuffer(file.buffer, destPath, safeName);
+    } else if (tmpPath) {
+      // Disk-based path present
+      proofUrl = await uploadFileToGitHub(tmpPath, destPath);
+    } else {
+      // Neither buffer nor path — defensive error
+      throw new Error('Uploaded file has no buffer or path.');
+    }
+
+    // Try to clean up tmpPath if it exists
+    if (tmpPath) {
+      try { fs.unlinkSync(tmpPath); } catch (e) { /* ignore cleanup errors */ }
+    }
+
     return {
       proofUrl,
       proofMeta: {
         originalName,
-        size: file.size,
+        size: file.size || (file.buffer ? file.buffer.length : undefined),
         mimeType: file.mimetype,
+        destPath,
       },
     };
   } catch (err) {
-    try { fs.unlinkSync(tmpPath); } catch (e) {}
-    throw new Error('Failed to upload file to GitHub: ' + err.message);
+    // Attempt cleanup if disk file was created
+    if (tmpPath) {
+      try { fs.unlinkSync(tmpPath); } catch (e) { /* ignore */ }
+    }
+    // Re-throw with a clear message (controller logs it)
+    throw new Error('Failed to upload file to GitHub: ' + (err && err.message ? err.message : String(err)));
   }
 }
 
