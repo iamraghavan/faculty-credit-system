@@ -19,13 +19,17 @@ const TABLE_NAME = process.env.DYNAMO_DB_USERS;
 /**
  * Get current user profile
  */
+// Controllers/userController.js
 async function getProfile(req, res, next) {
   try {
-    if (!req.user) return res.status(401).json({ success: false, message: 'Unauthorized' });
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
 
     const params = {
       TableName: TABLE_NAME,
-      Key: { id: req.user.id },
+      // Use the same key attribute as defined in your DynamoDB schema (likely "_id")
+      Key: { _id: String(req.user._id || req.user.id) },
     };
 
     const result = await ddbDocClient.send(new GetCommand(params));
@@ -34,6 +38,7 @@ async function getProfile(req, res, next) {
     next(err);
   }
 }
+
 
 /**
  * Update current user profile
