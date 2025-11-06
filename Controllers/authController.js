@@ -8,7 +8,6 @@ const { recalcFacultyCredits } = require('../utils/calculateCredits');
 /**
  * Register a new user (DynamoDB version)
  */
-
 async function register(req, res, next) {
   try {
     const { name, email, password, college, department, role } = req.body;
@@ -16,34 +15,30 @@ async function register(req, res, next) {
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
 
-    // normalize email
     const normalizedEmail = String(email).trim().toLowerCase();
 
-    // duplicate email check
+    // Duplicate email check
     const existingUsers = await User.find({ email: normalizedEmail });
     if (existingUsers && existingUsers.length > 0) {
       return res.status(400).json({ success: false, message: 'Email already exists' });
     }
 
-    // Decide assigned role:
-    // - If no users exist: allow role param to create first admin (or faculty)
-    // - Else if an admin (req.user.role === 'admin') is creating: allow requested role
-    // - Else: allow unauthenticated/self-registration only to 'faculty' role (ignore role param)
-    let assignedRole = 'faculty';
+    // Role assignment logic
+    let assignedRole = 'faculty'; // default for self-registration
 
     const allUsers = await User.find();
     if (!allUsers || allUsers.length === 0) {
-      // first user: honor the role param if 'admin' requested, otherwise default to faculty
-      if (role === 'admin') assignedRole = 'admin';
+      // First user: allow admin, oa, or faculty
+      if (['admin', 'oa'].includes(role)) assignedRole = role;
       else assignedRole = 'faculty';
     } else {
-      // there are existing users
+      // There are existing users
       if (req.user && req.user.role === 'admin') {
-        // logged-in admin can create any role (admin or faculty)
-        if (role === 'admin' || role === 'faculty') assignedRole = role;
+        // Admin can create any role
+        if (['admin', 'oa', 'faculty'].includes(role)) assignedRole = role;
         else assignedRole = 'faculty';
       } else {
-        // not admin (or no token): allow self-registration but force role=faculty
+        // Non-admins (self-registration)
         assignedRole = 'faculty';
       }
     }
@@ -51,7 +46,7 @@ async function register(req, res, next) {
     // Hash password
     const hashed = await bcrypt.hash(password, 10);
 
-    // generate IDs and keys
+    // Generate IDs and keys
     const facultyID = generateFacultyID(college);
     const apiKey = generateApiKey();
 
@@ -72,10 +67,12 @@ async function register(req, res, next) {
 
     const newUser = await User.create(newUserPayload);
 
-    // sign JWT containing the Dynamo/Mongo id shape your auth expects
-    // If your User model uses _id for Dynamo, use newUser._id; otherwise use newUser.id
     const userIdForToken = newUser._id || newUser.id || newUser.pk || newUser.userId;
-    const token = jwt.sign({ id: userIdForToken, role: assignedRole }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '1h' });
+    const token = jwt.sign(
+      { id: userIdForToken, role: assignedRole },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
+    );
 
     return res.status(201).json({
       success: true,
@@ -94,23 +91,25 @@ async function register(req, res, next) {
   }
 }
 
-
 /**
  * Login with email & password (DynamoDB version)
  */
 async function login(req, res, next) {
   try {
     const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ success: false, message: 'Missing credentials' });
+    if (!email || !password)
+      return res.status(400).json({ success: false, message: 'Missing credentials' });
 
     const users = await User.find({ email });
-    if (users.length === 0) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    if (users.length === 0)
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
 
     const user = users[0];
     const match = await bcrypt.compare(password, user.password);
-    if (!match) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    if (!match)
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
 
-    // Recalculate credits before issuing token
+    // Recalculate credits only for faculty
     if (user.role === 'faculty') {
       try {
         await recalcFacultyCredits(user._id);
@@ -119,9 +118,12 @@ async function login(req, res, next) {
       }
     }
 
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '1h' });
+    const token = jwt.sign(
+      { id: user._id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
+    );
 
-    // Fetch updated user
     const freshUser = await User.findById(user._id);
 
     res.json({
@@ -149,7 +151,11 @@ async function login(req, res, next) {
 async function refreshToken(req, res, next) {
   try {
     if (!req.user) return res.status(401).json({ success: false, message: 'Unauthorized' });
-    const token = jwt.sign({ id: req.user._id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '1h' });
+    const token = jwt.sign(
+      { id: req.user._id, role: req.user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
+    );
     res.json({ success: true, token });
   } catch (err) {
     next(err);
