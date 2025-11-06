@@ -90,7 +90,7 @@ async function register(req, res, next) {
     next(err);
   }
 }
-// 010
+
 
 /**
  * Login with email & password (DynamoDB version)
