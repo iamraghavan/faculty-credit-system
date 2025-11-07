@@ -1,14 +1,17 @@
-// Routes/authRoutes.js
+// routes/authRoutes.js
 const express = require('express');
 const router = express.Router();
-const { register, login, refreshToken } = require('../Controllers/authController');
-const { authMiddleware } = require('../Middleware/authMiddleware');
+const { register, login, refreshToken, bulkRegister } = require('../Controllers/authController');
+const { authMiddleware,  adminOnly} = require('../Middleware/authMiddleware');
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
-// First user can register without login
+// existing
 router.post('/register', authMiddleware, register);
-
 router.post('/login', login);
 router.get('/refresh', authMiddleware, refreshToken);
 
+// NEW: bulk upload
+router.post('/users/bulk-upload', authMiddleware, adminOnly, upload.single('file'), bulkRegister);
 
-module.exports = router; 
+module.exports = router;

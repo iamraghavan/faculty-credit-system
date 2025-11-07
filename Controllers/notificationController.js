@@ -3,7 +3,7 @@
 
 const fs = require('fs').promises;
 const path = require('path');
-const User = require('../Models/User'); // your User model
+const User = require('../Models/User'); // your DynamoDB-based User model
 const { sendEmail } = require('../utils/email');
 const { renderTemplate, escapeHtml } = require('../utils/templateRenderer');
 
@@ -18,8 +18,9 @@ async function sendRemarkNotification(req, res, next) {
     const remark = req.body.remark || {};
     const { title, message, issuedBy } = remark;
 
-    // find faculty
-    const faculty = await User.findById(facultyId).select('name email').lean();
+    // find faculty using DynamoDB-backed User model
+    // User.findById should return the user item object or null
+    const faculty = await User.findById(facultyId);
     if (!faculty || !faculty.email) {
       return res.status(404).json({ success: false, message: 'Faculty not found or has no email' });
     }
