@@ -21,7 +21,7 @@ const {
   getNegativeAppeals
 } = require('../Controllers/adminController');
 
-const { authMiddleware, adminOnly, oaAlso } = require('../Middleware/authMiddleware');
+const { authMiddleware, adminOnly, adminOrOA } = require('../Middleware/authMiddleware');
 
 // Configure multer to use memory storage (serverless-safe)
 const upload = multer({
@@ -56,7 +56,7 @@ router.put('/credits/positive/:id/status', authMiddleware, adminOnly, updatePosi
 /**
  * Negative credits issued by admin to faculty
  */
-router.post('/credits/negative', authMiddleware, adminOnly, oaAlso, upload.single('proof'), issueNegativeCredit);
+router.post('/credits/negative', authMiddleware, adminOrOA, upload.single('proof'), issueNegativeCredit);
 
 /**
  * Faculty negative credits endpoint (frontend-friendly)
