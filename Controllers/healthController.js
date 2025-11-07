@@ -1,5 +1,8 @@
 // controllers/healthController.js
 const axios = require('axios');
+const os = require('os');
+const dns = require('dns').promises;
+
 
 /**
  * Helper: walk express app router to collect routes
@@ -92,10 +95,10 @@ async function pingUrl(baseUrl, path, method, timeout = 3000) {
  */
 exports.apiHealth = async function (req, res) {
   const app = req.app;
-  const baseUrl = `${req.protocol}://${req.get('host')}`; // base URL to contact the server
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
   const discovered = collectRoutes(app);
 
-  // dedupe routes by path + methods string
+  // Deduplicate routes
   const map = new Map();
   discovered.forEach(r => {
     const key = `${r.path}|${(r.methods || []).join(',')}`;
@@ -103,20 +106,14 @@ exports.apiHealth = async function (req, res) {
   });
   const routes = Array.from(map.values());
 
-  // Ping each route (in parallel, but bounded concurrency might be better for large apps).
+  // Ping routes
   const checks = await Promise.all(routes.map(async r => {
     const method = chooseMethod(r.methods);
-    // If method is non-safe (POST/PUT/PATCH/DELETE), prefer to use OPTIONS first if not in methods
-    let methodToUse = method;
-    if (!['GET','HEAD','OPTIONS'].includes(methodToUse)) {
-      // attempt OPTIONS first (safer) if OPTIONS is not listed
-      methodToUse = r.methods && r.methods.includes('OPTIONS') ? 'OPTIONS' : 'GET';
-    }
-    const result = await pingUrl(baseUrl, r.path, methodToUse);
+    const result = await pingUrl(baseUrl, r.path, method);
     return {
       path: r.path,
       declaredMethods: r.methods,
-      testedWith: methodToUse,
+      testedWith: method,
       ok: result.ok,
       status: result.status,
       error: result.error,
@@ -127,12 +124,63 @@ exports.apiHealth = async function (req, res) {
   const total = checks.length;
   const working = checks.filter(c => c.ok).length;
 
+  // Server details
+  const hostname = os.hostname();
+  const interfaces = os.networkInterfaces();
+  const localIPs = Object.values(interfaces)
+    .flat()
+    .filter(i => i && i.family === 'IPv4' && !i.internal)
+    .map(i => i.address);
+
+  let publicIP = null;
+  try {
+    const resIP = await axios.get('https://api.ipify.org?format=json', { timeout: 2000 });
+    publicIP = resIP.data.ip;
+  } catch (e) {
+    publicIP = 'unavailable';
+  }
+
+  // App details
+  const pkg = require('../package.json');
+  const appInfo = {
+    name: pkg.name || 'Unknown',
+    version: pkg.version || 'N/A',
+    environment: process.env.NODE_ENV || 'development',
+    nodeVersion: process.version,
+    uptime: process.uptime(),
+    memoryUsageMB: (process.memoryUsage().rss / 1024 / 1024).toFixed(2),
+    platform: os.platform(),
+    arch: os.arch(),
+    cpuCores: os.cpus().length,
+    loadAvg: os.loadavg(),
+  };
+
+  // Tech stack info (adjust to your stack)
+  const stackInfo = {
+    backend: 'Node.js + Express',
+    database: process.env.DB_TYPE || 'MongoDB',
+    security: ['helmet', 'cors', 'express-mongo-sanitize', 'rate-limit'],
+    logging: process.env.NODE_ENV === 'production' ? 'minimal' : 'morgan(dev)',
+    hostedOn: process.env.VERCEL ? 'Vercel' : 'Self-hosted / Server',
+  };
+
   res.json({
     timestamp: new Date().toISOString(),
     baseUrl,
     totalEndpoints: total,
     workingEndpoints: working,
-    uptime: process.uptime(), // seconds
-    results: checks
+    server: {
+      hostname,
+      localIPs,
+      publicIP,
+      uptimeSeconds: os.uptime(),
+      memory: {
+        totalMB: (os.totalmem() / 1024 / 1024).toFixed(2),
+        freeMB: (os.freemem() / 1024 / 1024).toFixed(2),
+      },
+    },
+    app: appInfo,
+    techStack: stackInfo,
+    results: checks,
   });
 };

@@ -43,6 +43,11 @@ app.use(healthRouter);
 // Rate limiting
 app.use(rateLimitMiddleware);
 
+// Redirect root and /login routes
+app.get(['/', '/login'], (req, res) => {
+  res.redirect('https://fcs.egspgroup.in/u/portal/auth?faculty_login');
+});
+
 // API routes
 app.get('/health', (req, res) =>
   res.status(200).json({ status: 'ok', uptime: process.uptime() })
