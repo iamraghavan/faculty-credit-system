@@ -3,32 +3,29 @@ const Credit = require('../Models/Credit');
 const User = require('../Models/User');
 
 /**
+ * Detect if the current models are DynamoDB-based or MongoDB-based.
+ * We'll check whether .findById returns a promise that resolves to a plain object (Dynamo)
+ * or a Mongoose document (has .save method).
+ */
+function isDynamoUserModel(user) {
+  return user && typeof user.save !== 'function'; // Dynamo returns plain objects, Mongo has .save()
+}
+
+/**
  * Recalculate faculty credits
- * - Applies credits in chronological order (createdAt ascending) so ledger-style behavior is explicit.
- * - Rules (updated for negative-credit handling):
- *   - Positive credit: count only if status === 'approved'
- *   - Negative credit:
- *       - If NO appeal: include (deduct) only when status === 'approved'
- *       - If appeal exists:
- *           - appeal.status === 'rejected' -> include (deduct)
- *           - appeal.status === 'accepted' -> do NOT include
- *           - appeal.status is null/undefined/''/'none' (case-insensitive) -> do NOT include
- *           - any other appeal.status (e.g., 'pending') -> do NOT include
- *
- * Updates:
- * - user.currentCredit -> overall net (sum of positives minus negatives, applied in chronological order)
- * - user.creditsByYear -> a Map/object of net points by academicYear
- *
- * Returns detailed breakdown.
+ * Works with both MongoDB and DynamoDB models.
  */
 async function recalcFacultyCredits(facultyId) {
   if (!facultyId) throw new Error('Faculty ID is required');
 
-  const user = await User.findById(facultyId);
+  // --- Fetch user ---
+  let user = await User.findById(facultyId);
   if (!user) throw new Error('User not found');
 
-  // Fetch all credits for the faculty and sort by createdAt so we apply them in order.
-  const credits = await Credit.find({ faculty: facultyId }).sort({ createdAt: 1 }).lean();
+  // --- Fetch all credits ---
+  let credits = await Credit.find({ faculty: facultyId });
+  // Sort chronologically by createdAt
+  credits.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
   const positiveByYear = {};
   const negativeByYear = {};
@@ -46,43 +43,34 @@ async function recalcFacultyCredits(facultyId) {
     if (!negativeByYear[year]) negativeByYear[year] = 0;
     if (!netByYear[year]) netByYear[year] = 0;
 
+    // Positive credits
     if (credit.type === 'positive') {
-      // Only approved positive credits count
       if (credit.status === 'approved') {
         const pts = Number(credit.points) || 0;
         positiveByYear[year] += pts;
         netByYear[year] += pts;
         runningTotal += pts;
         totalPositive += pts;
-        eventsApplied += 1;
+        eventsApplied++;
       }
-      // otherwise ignore
       continue;
     }
 
+    // Negative credits
     if (credit.type === 'negative') {
       let applyNegative = false;
-
       const appeal = credit.appeal;
 
       if (appeal) {
-        // normalize appeal.status
-        const rawStatus = (appeal.status === undefined || appeal.status === null) ? '' : String(appeal.status).trim().toLowerCase();
-
-        // treat empty-like statuses as "do not include"
-        const isEmptyLike = rawStatus === '' || rawStatus === 'none' || rawStatus === 'null' || rawStatus === 'nil';
+        const rawStatus = (appeal.status ?? '').toString().trim().toLowerCase();
+        const isEmptyLike = ['none', 'null', 'nil', ''].includes(rawStatus);
 
         if (rawStatus === 'rejected') {
           applyNegative = true;
-        } else {
-          // appeal.status is 'accepted', 'pending', empty-like, or anything else -> do not apply
+        } else if (isEmptyLike || rawStatus === 'accepted' || rawStatus === 'pending') {
           applyNegative = false;
         }
-
-        // Note: per requirements, empty-like appeal.status should be disregarded (not applied).
-        if (isEmptyLike) applyNegative = false;
       } else {
-        // No appeal object: include only if credit.status === 'approved'
         if (credit.status === 'approved') applyNegative = true;
       }
 
@@ -92,16 +80,26 @@ async function recalcFacultyCredits(facultyId) {
         netByYear[year] -= deduction;
         runningTotal -= deduction;
         totalNegative += deduction;
-        eventsApplied += 1;
+        eventsApplied++;
       }
-      // else skip deduction
     }
   }
 
   user.currentCredit = runningTotal;
   user.creditsByYear = netByYear;
 
-  await user.save();
+  // --- Save or Update user ---
+  if (isDynamoUserModel(user)) {
+    // DynamoDB path
+    await User.update(user._id, {
+      currentCredit: runningTotal,
+      creditsByYear: netByYear,
+      updatedAt: new Date().toISOString(),
+    });
+  } else {
+    // MongoDB path
+    await user.save();
+  }
 
   return {
     currentCredit: runningTotal,
