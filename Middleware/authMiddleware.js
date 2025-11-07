@@ -27,9 +27,17 @@ function AdminMiddleware(req, res, next) {
 
 function adminOnly(req, res, next) {
   if (!req.user || req.user.role !== 'admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden - admin only' });
+    return res.status(403).json({ success: false, message: 'Forbidden - Admin & OA only' });
   }
   next();
 }
 
-module.exports = { authMiddleware, AdminMiddleware, adminOnly };
+function oaAlso(req, res, next) {
+  if (!req.user || req.user.role !== 'oa') {
+    return res.status(403).json({ success: false, message: 'Forbidden - Admin & OA only' });
+  }
+  next();
+}
+
+
+module.exports = { oaAlso, authMiddleware, AdminMiddleware, adminOnly };
