@@ -169,9 +169,7 @@ async function refreshToken(req, res, next) {
   }
 }
 
-
-// --- Simple in-process email queue (no Redis) ---------------------------------
-// NOTE: This is an in-memory queue. For very large uploads or multiple instances, replace with a persistent queue.
+// Simple in-process email queue (no Redis)
 function createEmailQueue({ concurrency = 5, maxRetries = 3, baseDelayMs = 1000 } = {}) {
   const queue = [];
   let active = 0;
@@ -181,7 +179,8 @@ function createEmailQueue({ concurrency = 5, maxRetries = 3, baseDelayMs = 1000 
     while (attempt <= maxRetries) {
       attempt++;
       try {
-        await sendEmail(task.mailOptions, 0); // sendEmail already has internal retry; pass 0 to avoid double retrying
+        // sendEmail returns {sent: true, info} on success or throws on error
+        await sendEmail(task.mailOptions, 0); // pass 0 to avoid nested retries in worker
         return { success: true, attempts: attempt };
       } catch (err) {
         const isLast = attempt > maxRetries;
@@ -192,6 +191,7 @@ function createEmailQueue({ concurrency = 5, maxRetries = 3, baseDelayMs = 1000 
         await new Promise((r) => setTimeout(r, delay));
       }
     }
+    return { success: false, error: 'Unknown worker error' };
   }
 
   function processNext() {
@@ -217,31 +217,24 @@ function createEmailQueue({ concurrency = 5, maxRetries = 3, baseDelayMs = 1000 
     enqueue(task) {
       return new Promise((resolve) => {
         queue.push({ task, resolve });
-        // attempt to process immediately
         processNext();
       });
     },
-    // helper to wait until queue drained (optional)
     async drain() {
       while (queue.length > 0 || active > 0) {
-        // small delay
-        // eslint-disable-next-line no-await-in-loop
         await new Promise((r) => setTimeout(r, 250));
       }
     },
   };
 }
-// -------------------------------------------------------------------------------
-
 
 /**
  * Bulk register users from uploaded Excel/CSV file
  * Route usage: router.post('/users/bulk-upload', authMiddleware, adminOnly, upload.single('file'), bulkRegister)
  *
- * Environment / config expectations:
- * - EMAIL template path: process.env.BULK_USER_EMAIL_TEMPLATE (optional). If not provided, defaults to ./templates/bulk_user_email.html
- * - Template must be HTML and support placeholders: {{name}}, {{email}}, {{password}}, {{loginUrl}}
- * - Optionally caller can pass ?sendEmails=false to skip sending emails
+ * Query params:
+ *  - sendEmails (default true) => if false, skip sending emails
+ *  - waitForEmailQueue (default false) => if true, API waits for queue drain (not recommended for large files)
  */
 async function bulkRegister(req, res, next) {
   try {
@@ -250,21 +243,20 @@ async function bulkRegister(req, res, next) {
       return res.status(400).json({ success: false, message: 'No file uploaded. Provide file as form-data key "file".' });
     }
 
-    // Load email template (if exists)
+    // Resolve template path (default fallback)
     const templatePath = process.env.BULK_USER_EMAIL_TEMPLATE
       ? path.resolve(process.env.BULK_USER_EMAIL_TEMPLATE)
-      : path.resolve(__dirname, '..', 'templates', 'bulk_user_email.html');
+      : path.resolve(process.cwd(), 'email-templates', 'bulk-user.html');
 
     let emailTemplateHtml = null;
     try {
       emailTemplateHtml = await fs.readFile(templatePath, 'utf8');
     } catch (err) {
-      // If template missing, we won't fail — will use a simple fallback plaintext email
-      console.warn(`Bulk email template not found at ${templatePath}. Falling back to plaintext message.`);
+      console.warn(`Bulk email template not found at ${templatePath}. Falling back to simple HTML/text.`);
       emailTemplateHtml = null;
     }
 
-    // parse workbook
+    // Parse workbook
     const buffer = req.file.buffer;
     const workbook = XLSX.read(buffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];
@@ -275,27 +267,25 @@ async function bulkRegister(req, res, next) {
       return res.status(400).json({ success: false, message: 'File contains no rows.' });
     }
 
-    // Allowed roles if provided
     const ALLOWED_ROLES = ['admin', 'oa', 'faculty'];
 
     // load existing users to check duplicates
     const allUsers = await User.find();
     const existingEmails = new Set((allUsers || []).map((u) => String(u.email).toLowerCase()));
 
-    // Prepare queue for emails if sendEmails !== 'false'
+    // Email queue
     const sendEmailsFlag = !(String(req.query.sendEmails || 'true').toLowerCase() === 'false');
     const emailQueue = createEmailQueue({ concurrency: Number(process.env.BULK_EMAIL_CONCURRENCY) || 5, maxRetries: 3 });
 
     const results = [];
 
-    // For the "first user" logic: if DB has no users, we must treat the first successful creation here as the first user.
-    // We'll track whether DB was initially empty and update accordingly.
+    // first-user tracking
     let dbInitiallyEmpty = !allUsers || allUsers.length === 0;
     let createdCountInThisBatch = 0;
 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
-      const rowNum = i + 2; // header row considered 1
+      const rowNum = i + 2; // header considered row 1
       try {
         // Map expected columns (case-insensitive)
         const name = r['name'] ?? r['Name'] ?? r['fullName'] ?? r['Full Name'] ?? null;
@@ -328,17 +318,15 @@ async function bulkRegister(req, res, next) {
           continue;
         }
 
-        // role assignment
+        // role assignment logic
         let assignedRole = 'faculty';
         if (dbInitiallyEmpty && createdCountInThisBatch === 0) {
-          // This is the first creation in the system (no users before this batch and none created yet in this batch)
           if (roleRaw && ['admin', 'oa'].includes(String(roleRaw).toLowerCase())) {
             assignedRole = String(roleRaw).toLowerCase();
           } else {
             assignedRole = 'faculty';
           }
         } else {
-          // DB not empty or already created user in this batch
           if (req.user && req.user.role === 'admin') {
             if (roleRaw && ALLOWED_ROLES.includes(String(roleRaw).toLowerCase())) {
               assignedRole = String(roleRaw).toLowerCase();
@@ -350,13 +338,13 @@ async function bulkRegister(req, res, next) {
           }
         }
 
-        // Save plaintext password for email only (not returned via API)
+        // plaintext password from sheet (for email only)
         const plaintextPassword = String(passwordRaw);
 
-        // Hash password for storing
+        // hash password before storing
         const hashed = await bcrypt.hash(plaintextPassword, 10);
 
-        // Generate IDs and apiKey
+        // generate ids
         const facultyID = generateFacultyID(college);
         const apiKey = generateApiKey();
 
@@ -377,16 +365,15 @@ async function bulkRegister(req, res, next) {
           updatedAt: new Date().toISOString(),
         };
 
-        // Create user in DB
+        // create user
         const created = await User.create(newUserPayload);
 
-        // Mark email used
+        // mark email used
         existingEmails.add(email);
         createdCountInThisBatch++;
-        // after the first creation, the system is no longer empty
         dbInitiallyEmpty = false;
 
-        // Prepare result entry
+        // prepare result container
         const resultItem = {
           row: rowNum,
           success: true,
@@ -398,33 +385,36 @@ async function bulkRegister(req, res, next) {
           emailError: null,
         };
 
-        // Queue email if enabled and template or fallback exists
+        // send or queue email if enabled
         if (sendEmailsFlag) {
-          // Compose personalized email HTML/text
           const loginUrl = process.env.LOGIN_URL || `${req.protocol}://${req.get('host')}/login`;
+          // Build HTML (from template or fallback)
           let html = null;
           let text = null;
 
           if (emailTemplateHtml) {
-            // simple placeholder replacement - you can extend with a proper templating lib if needed
             html = emailTemplateHtml
               .replace(/{{\s*name\s*}}/gi, created.name || '')
               .replace(/{{\s*email\s*}}/gi, created.email || '')
               .replace(/{{\s*password\s*}}/gi, plaintextPassword)
-              .replace(/{{\s*loginUrl\s*}}/gi, loginUrl);
-            // fallback plain text by stripping tags (simple)
+              .replace(/{{\s*loginUrl\s*}}/gi, loginUrl)
+              .replace(/{{\s*facultyID\s*}}/gi, facultyID || '')
+              .replace(/{{\s*college\s*}}/gi, created.college || '');
+
+            // simple text fallback
             text = `Hello ${created.name},\n\nYour account has been created.\nEmail: ${created.email}\nPassword: ${plaintextPassword}\nLogin: ${loginUrl}\n\nPlease change your password after first login.`;
           } else {
-            // fallback HTML and text
             html = `<p>Hello ${created.name},</p>
 <p>Your account has been created.</p>
 <ul>
   <li><strong>Email:</strong> ${created.email}</li>
   <li><strong>Password:</strong> ${plaintextPassword}</li>
+  <li><strong>Faculty ID:</strong> ${facultyID}</li>
+  <li><strong>College:</strong> ${created.college}</li>
 </ul>
 <p>Login here: <a href="${loginUrl}">${loginUrl}</a></p>
 <p>Please change your password after first login.</p>`;
-            text = `Hello ${created.name},\n\nYour account has been created.\nEmail: ${created.email}\nPassword: ${plaintextPassword}\nLogin: ${loginUrl}\n\nPlease change your password after first login.`;
+            text = `Hello ${created.name},\n\nYour account has been created.\nEmail: ${created.email}\nPassword: ${plaintextPassword}\nFaculty ID: ${facultyID}\nLogin: ${loginUrl}\n\nPlease change your password after first login.`;
           }
 
           const mailOptions = {
@@ -434,8 +424,7 @@ async function bulkRegister(req, res, next) {
             html,
           };
 
-          // enqueue and await queue response (we enqueue and do not block overall processing for too long)
-          // We enqueue and store a Promise, but to keep memory lower we await result here so we report per-row status immediately.
+          // enqueue and await result from queue
           try {
             resultItem.emailQueued = true;
             const emailResult = await emailQueue.enqueue({ mailOptions });
@@ -453,17 +442,16 @@ async function bulkRegister(req, res, next) {
 
         results.push(resultItem);
       } catch (errRow) {
-        results.push({ row: rowNum, success: false, message: errRow.message || 'Unknown error' });
+        results.push({ row: rowNum, success: false, message: errRow.message || String(errRow) || 'Unknown error' });
       }
     } // end for rows
 
     const successCount = results.filter((r) => r.success).length;
     const failureCount = results.length - successCount;
 
-    // Optionally wait for queue to drain before returning (be careful with large files). Default: do not wait.
+    // Optionally wait for queue to drain before returning (careful with large uploads)
     const waitForQueue = String(req.query.waitForEmailQueue || 'false').toLowerCase() === 'true';
     if (waitForQueue && sendEmailsFlag) {
-      // Wait until all queued tasks finished (but our enqueue awaited each task already)
       await emailQueue.drain();
     }
 
@@ -476,8 +464,6 @@ async function bulkRegister(req, res, next) {
     next(err);
   }
 }
-
-
 
 
 module.exports = { register, login, refreshToken, bulkRegister  };

@@ -1,0 +1,57 @@
+<!-- email-templates/bulk-user.html -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>EGSPOGI - CreditWiseYour account has been created</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+      /* Simple, email-safe styling */
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; background:#f6f6f6; margin:0; padding:0; }
+      .container { width:100%; max-width:600px; margin:32px auto; background:#ffffff; border-radius:8px; overflow:hidden; box-shadow:0 2px 6px rgba(0,0,0,0.08); }
+      .header { background:#004080; color:white; padding:18px 24px; }
+      .header h1 { margin:0; font-size:18px; font-weight:600; }
+      .content { padding:24px; color:#333333; line-height:1.5; }
+      .btn { display:inline-block; padding:10px 16px; background:#0073e6; color:white; text-decoration:none; border-radius:6px; margin-top:12px; }
+      .details { background:#f7f7f7; padding:12px; border-radius:6px; margin-top:12px; font-family:monospace; }
+      .footer { font-size:12px; color:#777; padding:16px 24px; text-align:center; }
+    </style>
+  </head>
+  <body>
+    <div class="container" role="article" aria-label="Account created">
+      <div class="header">
+        <h1>EGSPGOI - CreditWise</h1>
+      </div>
+
+      <div class="content">
+        <p>Hello <strong>{{name}}</strong>,</p>
+
+        <p>Your user account has been created for <strong>{{college}}</strong>. Use the credentials below to sign in for the first time.</p>
+
+        <div class="details">
+          <p><strong>Email:</strong> {{email}}</p>
+          <p><strong>Password:</strong> {{password}}</p>
+          <p><strong>Faculty ID:</strong> {{facultyID}}</p>
+        </div>
+
+        <p>
+          Click the button below to go to the login page:
+        </p>
+
+        <p>
+          <a class="btn" href="{{loginUrl}}" target="_blank" rel="noopener">Sign in to your account</a>
+        </p>
+
+        <p>
+          For security, please change your password immediately after logging in. If you did not expect this email, please contact your administrator.
+        </p>
+
+        <p>Regards,<br/>EGSPGOI - CreditWise team</p>
+      </div>
+
+      <div class="footer">
+        <div>&copy; EGSPGOI. This is an automated message — please do not reply directly to this email.</div>
+      </div>
+    </div>
+  </body>
+</html>
