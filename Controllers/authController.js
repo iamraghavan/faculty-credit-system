@@ -10,7 +10,8 @@ const { v4: uuidv4 } = require('uuid');
 const { sendEmail } = require('../utils/email'); // your existing email util
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB
 
-
+const fs = require('fs').promises;
+const path = require('path');
 /**
  * Register a new user (DynamoDB version)
  */
