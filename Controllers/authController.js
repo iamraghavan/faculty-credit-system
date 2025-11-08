@@ -9,7 +9,7 @@ const XLSX = require('xlsx');
 const { v4: uuidv4 } = require('uuid');
 const { sendEmail } = require('../utils/email'); // your existing email util
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB
-
+const crypto = require('crypto');
 const fs = require('fs').promises;
 const path = require('path');
 /**
@@ -467,4 +467,115 @@ async function bulkRegister(req, res, next) {
 }
 
 
-module.exports = { register, login, refreshToken, bulkRegister  };
+
+/**
+ * Forgot Password
+ * Sends an email with a reset link to the user if the email exists.
+ */
+async function forgotPassword(req, res, next) {
+  try {
+    const { email } = req.body;
+    if (!email)
+      return res.status(400).json({ success: false, message: 'Email is required' });
+
+    const users = await User.find({ email: email.toLowerCase() });
+    if (!users || users.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'If that email exists, a reset link was sent.',
+      }); // avoid leaking user existence
+    }
+
+    const user = users[0];
+
+    // Create reset token (short-lived)
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+    const resetExpires = Date.now() + 1000 * 60 * 10; // 10 minutes
+
+    // Save token & expiry in user record
+    await User.update(user._id, {
+      resetPasswordToken: hashedToken,
+      resetPasswordExpires: resetExpires,
+    });
+
+    const resetUrl = `${process.env.FRONTEND_URL || 'https://yourfrontend.com'}/reset-password/${resetToken}`;
+
+    const mailOptions = {
+      to: user.email,
+      subject: 'Password Reset - Faculty Credit System',
+      text: `Hello ${user.name},\n\nPlease click the link below to reset your password:\n${resetUrl}\n\nThis link will expire in 10 minutes.\nIf you didn’t request this, you can ignore this email.`,
+      html: `<p>Hello ${user.name},</p>
+<p>Please click the link below to reset your password:</p>
+<p><a href="${resetUrl}" target="_blank">${resetUrl}</a></p>
+<p>This link will expire in 10 minutes. If you didn’t request this, you can safely ignore it.</p>`,
+    };
+
+    await sendEmail(mailOptions);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Password reset email sent (if email exists)',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Reset Password
+ * Verifies the token and updates the password.
+ */
+async function resetPassword(req, res, next) {
+  try {
+    const { token } = req.params;
+    const { password } = req.body;
+
+    if (!token || !password)
+      return res.status(400).json({ success: false, message: 'Token and new password required' });
+
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+    // Scan all users and find matching token (DynamoDB doesn’t support direct secondary key lookups easily)
+    const users = await User.find();
+    const user = users.find(
+      (u) =>
+        u.resetPasswordToken === hashedToken &&
+        u.resetPasswordExpires &&
+        Date.now() < Number(u.resetPasswordExpires)
+    );
+
+    if (!user)
+      return res.status(400).json({ success: false, message: 'Invalid or expired token' });
+
+    const hashed = await bcrypt.hash(password, 10);
+
+    await User.update(user._id, {
+      password: hashed,
+      resetPasswordToken: null,
+      resetPasswordExpires: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const mailOptions = {
+      to: user.email,
+      subject: 'Your password has been changed',
+      text: `Hello ${user.name},\n\nYour password has been successfully reset.\nIf you did not perform this action, please contact support immediately.`,
+      html: `<p>Hello ${user.name},</p>
+<p>Your password has been successfully reset.</p>
+<p>If you did not perform this action, please contact support immediately.</p>`,
+    };
+
+    await sendEmail(mailOptions);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Password has been reset successfully',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+
+module.exports = { register, login, refreshToken, bulkRegister,  forgotPassword, resetPassword,  };
