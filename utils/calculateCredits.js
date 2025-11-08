@@ -1,32 +1,59 @@
 // utils/calculateCredits.js
+'use strict';
+
 const Credit = require('../Models/Credit');
 const User = require('../Models/User');
 
 /**
- * Detect if the current models are DynamoDB-based or MongoDB-based.
- * We'll check whether .findById returns a promise that resolves to a plain object (Dynamo)
- * or a Mongoose document (has .save method).
+ * Determine if this user object is from DynamoDB (plain object, no `.save()`).
+ * @param {Object} user
+ * @returns {boolean}
  */
 function isDynamoUserModel(user) {
-  return user && typeof user.save !== 'function'; // Dynamo returns plain objects, Mongo has .save()
+  return user && typeof user.save !== 'function';
 }
 
 /**
- * Recalculate faculty credits
- * Works with both MongoDB and DynamoDB models.
+ * Fetch the user by ID and validate existence.
+ * @param {string} facultyId
+ * @returns {Promise<Object>} user object
+ * @throws {Error}
  */
-async function recalcFacultyCredits(facultyId) {
-  if (!facultyId) throw new Error('Faculty ID is required');
+async function fetchUser(facultyId) {
+  if (!facultyId) {
+    throw new Error('Faculty ID parameter is required.');
+  }
+  const user = await User.findById(facultyId);
+  if (!user) {
+    const err = new Error(`User not found for id=${facultyId}`);
+    err.code = 'USER_NOT_FOUND';
+    throw err;
+  }
+  return user;
+}
 
-  // --- Fetch user ---
-  let user = await User.findById(facultyId);
-  if (!user) throw new Error('User not found');
-
-  // --- Fetch all credits ---
-  let credits = await Credit.find({ faculty: facultyId });
-  // Sort chronologically by createdAt
+/**
+ * Fetch all credits for a faculty and sort them chronologically.
+ * @param {string} facultyId
+ * @returns {Promise<Array>} sorted credits
+ */
+async function fetchAndSortCredits(facultyId) {
+  const credits = await Credit.find({ faculty: facultyId });
+  if (!Array.isArray(credits)) {
+    const err = new Error(`Unexpected result fetching credits for facultyId=${facultyId}`);
+    err.code = 'CREDITS_FETCH_ERROR';
+    throw err;
+  }
   credits.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  return credits;
+}
 
+/**
+ * Process credits array to compute positive, negative, net by year, and overall totals.
+ * @param {Array} credits
+ * @returns {Object} result object with metrics
+ */
+function processCredits(credits) {
   const positiveByYear = {};
   const negativeByYear = {};
   const netByYear = {};
@@ -39,43 +66,36 @@ async function recalcFacultyCredits(facultyId) {
   for (const credit of credits) {
     const year = credit.academicYear || 'unknown';
 
-    if (!positiveByYear[year]) positiveByYear[year] = 0;
-    if (!negativeByYear[year]) negativeByYear[year] = 0;
-    if (!netByYear[year]) netByYear[year] = 0;
+    if (!(year in positiveByYear)) positiveByYear[year] = 0;
+    if (!(year in negativeByYear)) negativeByYear[year] = 0;
+    if (!(year in netByYear)) netByYear[year] = 0;
 
-    // Positive credits
-    if (credit.type === 'positive') {
-      if (credit.status === 'approved') {
-        const pts = Number(credit.points) || 0;
-        positiveByYear[year] += pts;
-        netByYear[year] += pts;
-        runningTotal += pts;
-        totalPositive += pts;
-        eventsApplied++;
-      }
-      continue;
-    }
+    const pts = Number(credit.points) || 0;
 
-    // Negative credits
-    if (credit.type === 'negative') {
+    if (credit.type === 'positive' && credit.status === 'approved') {
+      positiveByYear[year] += pts;
+      netByYear[year] += pts;
+      runningTotal += pts;
+      totalPositive += pts;
+      eventsApplied++;
+    } else if (credit.type === 'negative') {
       let applyNegative = false;
-      const appeal = credit.appeal;
-
-      if (appeal) {
-        const rawStatus = (appeal.status ?? '').toString().trim().toLowerCase();
-        const isEmptyLike = ['none', 'null', 'nil', ''].includes(rawStatus);
-
+      if (credit.appeal) {
+        const rawStatus = String(credit.appeal.status || '').trim().toLowerCase();
+        const isEmpty = ['', 'none', 'null', 'nil'].includes(rawStatus);
         if (rawStatus === 'rejected') {
           applyNegative = true;
-        } else if (isEmptyLike || rawStatus === 'accepted' || rawStatus === 'pending') {
+        } else {
           applyNegative = false;
         }
       } else {
-        if (credit.status === 'approved') applyNegative = true;
+        if (credit.status === 'approved') {
+          applyNegative = true;
+        }
       }
 
       if (applyNegative) {
-        const deduction = Math.abs(Number(credit.points) || 0);
+        const deduction = Math.abs(pts);
         negativeByYear[year] += deduction;
         netByYear[year] -= deduction;
         runningTotal -= deduction;
@@ -83,34 +103,80 @@ async function recalcFacultyCredits(facultyId) {
         eventsApplied++;
       }
     }
-  }
-
-  user.currentCredit = runningTotal;
-  user.creditsByYear = netByYear;
-
-  // --- Save or Update user ---
-  if (isDynamoUserModel(user)) {
-    // DynamoDB path
-    await User.update(user._id, {
-      currentCredit: runningTotal,
-      creditsByYear: netByYear,
-      updatedAt: new Date().toISOString(),
-    });
-  } else {
-    // MongoDB path
-    await user.save();
+    // else: ignore other types/status combinations
   }
 
   return {
-    currentCredit: runningTotal,
-    creditsByYear: netByYear,
-    positiveByYear,
-    negativeByYear,
+    runningTotal,
     totalPositive,
     totalNegative,
-    netTotal: runningTotal,
     eventsApplied,
+    positiveByYear,
+    negativeByYear,
+    netByYear,
   };
 }
 
-module.exports = { recalcFacultyCredits };
+/**
+ * Persist the recalculated credits back to the user record.
+ * @param {Object} user
+ * @param {Object} metrics
+ * @returns {Promise<void>}
+ */
+async function updateUserCredits(user, metrics) {
+  const updatePayload = {
+    currentCredit: metrics.runningTotal,
+    creditsByYear: metrics.netByYear,
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (isDynamoUserModel(user)) {
+    await User.update(user._id, updatePayload);
+  } else {
+    // MongoDB path
+    user.currentCredit = metrics.runningTotal;
+    user.creditsByYear = metrics.netByYear;
+    user.updatedAt = updatePayload.updatedAt;
+    await user.save();
+  }
+}
+
+/**
+ * Recalculate faculty credits for a given faculty user ID.
+ * @param {string} facultyId
+ * @returns {Promise<Object>} result metrics
+ * @throws {Error} with helpful code/message
+ */
+async function recalcFacultyCredits(facultyId) {
+  try {
+    const user = await fetchUser(facultyId);
+    const credits = await fetchAndSortCredits(facultyId);
+    const metrics = processCredits(credits);
+    await updateUserCredits(user, metrics);
+
+    return {
+      currentCredit: metrics.runningTotal,
+      creditsByYear: metrics.netByYear,
+      positiveByYear: metrics.positiveByYear,
+      negativeByYear: metrics.negativeByYear,
+      totalPositive: metrics.totalPositive,
+      totalNegative: metrics.totalNegative,
+      netTotal: metrics.runningTotal,
+      eventsApplied: metrics.eventsApplied,
+    };
+  } catch (err) {
+    // Enhance error with context
+    const error = new Error(`recalcFacultyCredits failed: ${err.message}`);
+    error.original = err;
+    throw error;
+  }
+}
+
+module.exports = {
+  recalcFacultyCredits,
+  // Export internal functions for testing if desired
+  fetchUser,
+  fetchAndSortCredits,
+  processCredits,
+  updateUserCredits,
+};

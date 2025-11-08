@@ -499,17 +499,67 @@ async function forgotPassword(req, res, next) {
       resetPasswordExpires: resetExpires,
     });
 
-    const resetUrl = `${process.env.FRONTEND_URL || 'https://yourfrontend.com'}/reset-password/${resetToken}`;
+    const resetUrl = `${process.env.FRONTEND_URL || 'https://fcs.egspgroup.in/u/portal/auth/reset-password'}/reset-password/${resetToken}`;
 
     const mailOptions = {
-      to: user.email,
-      subject: 'Password Reset - Faculty Credit System',
-      text: `Hello ${user.name},\n\nPlease click the link below to reset your password:\n${resetUrl}\n\nThis link will expire in 10 minutes.\nIf you didn’t request this, you can ignore this email.`,
-      html: `<p>Hello ${user.name},</p>
-<p>Please click the link below to reset your password:</p>
-<p><a href="${resetUrl}" target="_blank">${resetUrl}</a></p>
-<p>This link will expire in 10 minutes. If you didn’t request this, you can safely ignore it.</p>`,
-    };
+  to: user.email,
+  subject: 'Password Reset - Faculty Credit System',
+  text: `Hello ${user.name},
+
+We received a request to reset your password for the Faculty Credit System.
+
+Click the link below to reset your password:
+${resetUrl}
+
+This link will expire in 10 minutes.
+
+If you did not request a password reset, please ignore this email or contact your system administrator.`,
+
+  html: `
+  <div style="font-family: Arial, sans-serif; background-color: #f5f7fa; padding: 40px 0;">
+    <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
+      <div style="background: #0c3c78; color: #ffffff; padding: 20px 30px; text-align: center;">
+        <h2 style="margin: 0; font-size: 20px;">CreditWise - EGSPGOI</h2>
+      </div>
+
+      <div style="padding: 30px;">
+        <p style="font-size: 16px; color: #333;">Hello <strong>${user.name}</strong>,</p>
+
+        <p style="font-size: 15px; color: #444; line-height: 1.6;">
+          We received a request to reset your password for your CreditWise account.
+          To proceed, please click the button below:
+        </p>
+
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${resetUrl}" target="_blank"
+            style="background-color: #0c3c78; color: #ffffff; text-decoration: none; 
+                   padding: 12px 24px; border-radius: 5px; display: inline-block; font-weight: bold;">
+            Reset Password
+          </a>
+        </div>
+
+        <p style="font-size: 14px; color: #555; line-height: 1.6;">
+          Or, if the button above doesn’t work, copy and paste the following link into your browser:
+        </p>
+
+        <p style="word-break: break-all; color: #0c3c78; font-size: 13px; margin-top: 10px;">
+          <a href="${resetUrl}" target="_blank" style="color: #0c3c78;">${resetUrl}</a>
+        </p>
+
+        <p style="font-size: 14px; color: #555; margin-top: 25px;">
+          This link will expire in <strong>10 minutes</strong> for your security.
+          If you didn’t request this change, you can safely ignore this email or contact your system administrator.
+        </p>
+      </div>
+
+      <div style="background: #f0f3f8; padding: 15px 30px; text-align: center; font-size: 12px; color: #888;">
+        <p style="margin: 0;">&copy; ${new Date().getFullYear()} CreditWise | EGSPGOI</p>
+      </div>
+    </div>
+  </div>
+  `,
+};
+
 
     await sendEmail(mailOptions);
 
