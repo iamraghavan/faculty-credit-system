@@ -5,7 +5,7 @@ const { register, login, refreshToken, bulkRegister, forgotPassword, resetPasswo
   verifyAppMfaSetup,
   toggleEmailMfa,
   disableAllMfa,
-  verifyMfa } = require('../Controllers/authController');
+  verifyMfa, getProfile  } = require('../Controllers/authController');
 const { authMiddleware,  adminOnly} = require('../Middleware/authMiddleware');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -26,5 +26,8 @@ router.post('/mfa/verify-app-setup', authMiddleware, verifyAppMfaSetup);
 router.post('/mfa/toggle-email', authMiddleware, toggleEmailMfa);
 router.post('/mfa/disable-all', authMiddleware, disableAllMfa);
 router.post('/verify-mfa', verifyMfa);
+
+
+router.get('/profile', authMiddleware, getProfile);
 
 module.exports = router;

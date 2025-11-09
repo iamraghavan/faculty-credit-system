@@ -833,6 +833,64 @@ async function verifyMfa(req, res, next) {
     next(err);
   }
 }
+async function getProfile(req, res, next) {
+  try {
+    // Get the user ID from the auth middleware
+    const userId = String(req.user._id || req.user.id);
+
+    // Fetch the user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Select only the fields you want to return
+    const {
+      _id,
+      name,
+      prefix,
+      email,
+      role,
+      isActive,
+      department,
+      facultyID,
+      college,
+      currentCredit,
+      creditsByYear,
+      mfaEnabled,
+      mfaEmailEnabled,
+      mfaAppEnabled,
+      createdAt,
+      updatedAt,
+      apiKey,
+    } = user;
+
+    res.json({
+      success: true,
+      user: {
+        _id,
+        name,
+        prefix,
+        email,
+        role,
+        isActive,
+        department,
+        facultyID,
+        college,
+        currentCredit,
+        creditsByYear,
+        mfaEnabled,
+        mfaEmailEnabled,
+        mfaAppEnabled,
+        createdAt,
+        updatedAt,
+        apiKey,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
 
 
-module.exports = { register, login, refreshToken, bulkRegister,  forgotPassword, resetPassword,verifyMfa, enableAppMfa, verifyAppMfaSetup, toggleEmailMfa,disableAllMfa,  };
+module.exports = { register, login,getProfile, refreshToken, bulkRegister,  forgotPassword, resetPassword,verifyMfa, enableAppMfa, verifyAppMfaSetup, toggleEmailMfa,disableAllMfa,  };
