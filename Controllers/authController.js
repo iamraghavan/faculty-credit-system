@@ -722,20 +722,32 @@ async function resetPassword(req, res, next) {
     next(err);
   }
 }
-
 async function enableAppMfa(req, res, next) {
   try {
-    const userId = req.user.id; // must be DynamoDB _id
-    const user = await User.findById(userId);
+    // Try both possible user ID fields from JWT / auth middleware
+    const userId = req.user._id || req.user.id;
 
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'User ID not provided' });
+    }
+
+    // Ensure it's a string
+    const dynamoId = String(userId);
+
+    // Fetch user by DynamoDB _id
+    const user = await User.findById(dynamoId);
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
+    // Generate TOTP secret
     const secret = generateTotpSecret(user.email);
+
+    // Generate QR Code
     const qrCodeDataURL = await generateTotpQrCode(secret);
 
-    await User.update(user._id, { // safe: _id exists
+    // Save secret temporarily (not fully enabled until verified)
+    await User.update(user._id, {
       mfaAppEnabled: true,
       mfaSecret: secret.base32,
       mfaEnabled: true,
@@ -750,7 +762,7 @@ async function enableAppMfa(req, res, next) {
     });
   } catch (err) {
     console.error('enableAppMfa error:', err);
-    res.status(500).json({ success: false, message: err.message });
+    next(err);
   }
 }
 
