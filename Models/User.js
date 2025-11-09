@@ -29,14 +29,13 @@ module.exports = {
       resetPasswordToken: data.resetPasswordToken || null,
       resetPasswordExpires: data.resetPasswordExpires || null,
 
-      mfaEnabled: data.mfaEnabled ?? false,        // true if any MFA enabled
-mfaEmailEnabled: data.mfaEmailEnabled ?? false,
-mfaAppEnabled: data.mfaAppEnabled ?? false,
-
-mfaSecret: data.mfaSecret || null,           // for TOTP (app-based)
-mfaCode: data.mfaCode || null,               // for email MFA
-mfaCodeExpires: data.mfaCodeExpires || null, // for email MFA
-
+      // MFA fields
+      mfaEnabled: data.mfaEnabled ?? false,
+      mfaEmailEnabled: data.mfaEmailEnabled ?? false,
+      mfaAppEnabled: data.mfaAppEnabled ?? false,
+      mfaSecret: data.mfaSecret || null,
+      mfaCode: data.mfaCode || null,
+      mfaCodeExpires: data.mfaCodeExpires || null,
 
       ...data,
     };
@@ -71,12 +70,13 @@ mfaCodeExpires: data.mfaCodeExpires || null, // for email MFA
 
   /**
    * Update user by ID
-   * Accepts any fields, including resetPasswordToken / resetPasswordExpires
    */
   async update(id, data) {
+    if (!data || Object.keys(data).length === 0) return null;
+
     const client = getDynamoClient();
 
-    const updates = Object.entries(data).map(([k]) => `#${k} = :${k}`);
+    const updates = Object.keys(data).map((k) => `#${k} = :${k}`);
     const expNames = Object.fromEntries(Object.keys(data).map((k) => [`#${k}`, k]));
     const expValues = Object.fromEntries(Object.entries(data).map(([k, v]) => [`:${k}`, v]));
 
