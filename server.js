@@ -29,19 +29,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Security & sanitization
 app.use(helmet());
-// app.use(cors());
-
-// Allow all origins
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: false // cannot be true when origin is '*'
-}));
-
-// Handle preflight OPTIONS requests
-app.options('*', cors());
-
+app.use(cors());
 app.use(mongoSanitize());
 
 // Logging
