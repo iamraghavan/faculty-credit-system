@@ -223,31 +223,6 @@ async function login(req, res, next) {
   }
 }
 
-async function verifyMfa(req, res, next) {
-  try {
-    const { userId, code } = req.body;
-    const user = await User.findById(userId);
-    if (!user || !user.mfaEmailEnabled)
-      return res.status(400).json({ success: false, message: 'MFA not enabled or user invalid' });
-
-    if (!user.mfaCode || Date.now() > user.mfaCodeExpires)
-      return res.status(400).json({ success: false, message: 'MFA code expired' });
-
-    if (String(user.mfaCode) !== String(code))
-      return res.status(400).json({ success: false, message: 'Invalid MFA code' });
-
-    await User.update(userId, { mfaCode: null, mfaCodeExpires: null });
-
-    const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
-      expiresIn: process.env.JWT_EXPIRES_IN || '1h',
-    });
-
-    res.json({ success: true, message: 'MFA verified successfully', token });
-  } catch (err) {
-    next(err);
-  }
-}
-
 
 /**
  * Refresh token
@@ -766,12 +741,13 @@ async function enableAppMfa(req, res, next) {
   }
 }
 
-
 async function verifyAppMfaSetup(req, res, next) {
   try {
     const { token } = req.body;
-    const userId = req.user.id;
+    const userId = String(req.user._id || req.user.id);
+
     const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     if (!user.mfaSecret) {
       return res.status(400).json({ success: false, message: 'MFA secret not found' });
@@ -782,7 +758,8 @@ async function verifyAppMfaSetup(req, res, next) {
       return res.status(400).json({ success: false, message: 'Invalid or expired TOTP code' });
     }
 
-    await User.update(userId, { mfaAppEnabled: true, mfaEnabled: true });
+    await User.update(user._id, { mfaAppEnabled: true, mfaEnabled: true });
+
     res.json({ success: true, message: 'App-based MFA successfully verified and enabled' });
   } catch (err) {
     next(err);
@@ -792,7 +769,7 @@ async function verifyAppMfaSetup(req, res, next) {
 async function toggleEmailMfa(req, res, next) {
   try {
     const { enable } = req.body;
-    const userId = req.user.id;
+    const userId = String(req.user._id || req.user.id);
 
     await User.update(userId, {
       mfaEmailEnabled: !!enable,
@@ -807,7 +784,8 @@ async function toggleEmailMfa(req, res, next) {
 
 async function disableAllMfa(req, res, next) {
   try {
-    const userId = req.user.id;
+    const userId = String(req.user._id || req.user.id);
+
     await User.update(userId, {
       mfaEnabled: false,
       mfaEmailEnabled: false,
@@ -816,10 +794,41 @@ async function disableAllMfa(req, res, next) {
       mfaCode: null,
       mfaCodeExpires: null,
     });
+
     res.json({ success: true, message: 'All MFA disabled' });
   } catch (err) {
     next(err);
   }
 }
+
+async function verifyMfa(req, res, next) {
+  try {
+    const { userId: bodyUserId, code } = req.body;
+    const userId = String(bodyUserId || req.user._id || req.user.id);
+
+    const user = await User.findById(userId);
+    if (!user || !user.mfaEmailEnabled)
+      return res.status(400).json({ success: false, message: 'MFA not enabled or user invalid' });
+
+    if (!user.mfaCode || Date.now() > user.mfaCodeExpires)
+      return res.status(400).json({ success: false, message: 'MFA code expired' });
+
+    if (String(user.mfaCode) !== String(code))
+      return res.status(400).json({ success: false, message: 'Invalid MFA code' });
+
+    await User.update(user._id, { mfaCode: null, mfaCodeExpires: null });
+
+    const token = jwt.sign(
+      { id: user._id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
+    );
+
+    res.json({ success: true, message: 'MFA verified successfully', token });
+  } catch (err) {
+    next(err);
+  }
+}
+
 
 module.exports = { register, login, refreshToken, bulkRegister,  forgotPassword, resetPassword,verifyMfa, enableAppMfa, verifyAppMfaSetup, toggleEmailMfa,disableAllMfa,  };
