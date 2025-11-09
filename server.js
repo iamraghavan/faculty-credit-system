@@ -20,51 +20,39 @@ const healthRouter = require('./Routes/health');
 
 const app = express();
 
-// 👇 Trust proxy (for Vercel / Nginx / etc.)
+// 👇 Trust proxy for Vercel / other serverless providers
 app.set('trust proxy', 1);
 
 // Body parsers
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// --- ✅ OPEN CORS CONFIGURATION (Allow everything) ---
-app.use(cors({
-  origin: true, // Reflects request origin automatically
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
-
-
-// Handle all OPTIONS preflight requests
-app.options('*', cors());
-
-// --- Security Middleware ---
+// Security & sanitization
 app.use(helmet());
+app.use(cors());
 app.use(mongoSanitize());
 
-// --- Logging ---
+// Logging
 if (process.env.NODE_ENV !== 'production') {
   app.use(morgan('dev'));
 }
 
-// --- Health Route ---
+// Health route
 app.use(healthRouter);
 
-// --- Rate Limiting ---
+// Rate limiting
 app.use(rateLimitMiddleware);
 
-// --- Redirect root and /login ---
+// Redirect root and /login routes
 app.get(['/', '/login'], (req, res) => {
   res.redirect('https://fcs.egspgroup.in/u/portal/auth?faculty_login');
 });
 
-// --- Health Check ---
+// API routes
 app.get('/health', (req, res) =>
   res.status(200).json({ status: 'ok', uptime: process.uptime() })
 );
 
-// --- API Routes ---
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/credits', creditRoutes);
@@ -72,7 +60,7 @@ app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/conversations', conversationRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 
-// --- Error Handler ---
+// Error handling middleware
 app.use(errorHandler);
 
 module.exports = app;
