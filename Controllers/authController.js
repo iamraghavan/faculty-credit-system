@@ -726,17 +726,21 @@ async function resetPassword(req, res, next) {
 
 async function enableAppMfa(req, res, next) {
   try {
-    const userId = req.user.id;
-    const secret = generateTotpSecret(req.user.email);
+    const userId = req.user.id; // make sure this is the DynamoDB _id
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    const secret = generateTotpSecret(user.email);
 
     // Generate QR Code
     const qrCodeDataURL = await generateTotpQrCode(secret);
 
     // Save secret temporarily (not fully enabled until verified)
-    await User.update(userId, {
+    await User.update(user._id, { // <-- use _id
       mfaAppEnabled: true,
       mfaSecret: secret.base32,
       mfaEnabled: true,
+      updatedAt: new Date().toISOString(),
     });
 
     res.json({
@@ -749,6 +753,7 @@ async function enableAppMfa(req, res, next) {
     next(err);
   }
 }
+
 
 async function verifyAppMfaSetup(req, res, next) {
   try {
