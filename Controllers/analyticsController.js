@@ -172,3 +172,62 @@ exports.getAcademicYearInsights = async (req, res, next) => {
     next(err);
   }
 };
+
+exports.getCreditTrends = async (req, res, next) => {
+  try {
+    const allCredits = await Credit.find();
+
+    // Helper to format date (YYYY-MM-DD)
+    const formatDate = (date) => new Date(date).toISOString().split('T')[0];
+
+    // Group by day
+    const dailyData = {};
+    allCredits.forEach((c) => {
+      const day = formatDate(c.createdAt);
+      if (!dailyData[day]) dailyData[day] = { approved: 0, rejected: 0, pending: 0 };
+      dailyData[day][c.status] = (dailyData[day][c.status] || 0) + 1;
+    });
+
+    // Convert dailyData to sorted array
+    const dailyTrends = Object.entries(dailyData)
+      .sort(([a], [b]) => new Date(a) - new Date(b))
+      .map(([date, data]) => ({ date, ...data }));
+
+    // Weekly grouping
+    const getWeek = (d) => {
+      const date = new Date(d);
+      const firstDayOfYear = new Date(date.getFullYear(), 0, 1);
+      const days = Math.floor((date - firstDayOfYear) / (24 * 60 * 60 * 1000));
+      return `W${Math.ceil((days + firstDayOfYear.getDay() + 1) / 7)}-${date.getFullYear()}`;
+    };
+
+    const weeklyData = {};
+    allCredits.forEach((c) => {
+      const week = getWeek(c.createdAt);
+      if (!weeklyData[week]) weeklyData[week] = { approved: 0, rejected: 0, pending: 0 };
+      weeklyData[week][c.status] = (weeklyData[week][c.status] || 0) + 1;
+    });
+
+    const weeklyTrends = Object.entries(weeklyData).map(([week, data]) => ({ week, ...data }));
+
+    // Monthly grouping
+    const monthlyData = {};
+    allCredits.forEach((c) => {
+      const month = new Date(c.createdAt).toISOString().slice(0, 7); // YYYY-MM
+      if (!monthlyData[month]) monthlyData[month] = { approved: 0, rejected: 0, pending: 0 };
+      monthlyData[month][c.status] = (monthlyData[month][c.status] || 0) + 1;
+    });
+
+    const monthlyTrends = Object.entries(monthlyData).map(([month, data]) => ({ month, ...data }));
+
+    res.json({
+      success: true,
+      message: 'Credit trends fetched successfully',
+      daily: dailyTrends,
+      weekly: weeklyTrends,
+      monthly: monthlyTrends,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
