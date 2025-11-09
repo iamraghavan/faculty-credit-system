@@ -891,6 +891,50 @@ async function getProfile(req, res, next) {
     next(err);
   }
 }
+/**
+ * @desc Change password for logged-in user
+ * @route POST /api/v1/auth/change-password
+ * @access Private (requires JWT)
+ */
+async function changePassword(req, res, next) {
+  try {
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+    const userId = String(req.user._id || req.user.id);
+
+    // Validate fields
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json({ success: false, message: 'All fields are required.' });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ success: false, message: 'Passwords do not match.' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
+
+    // Check current password
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: 'Current password is incorrect.' });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update in DynamoDB
+    await User.update(user._id, {
+      password: hashedPassword,
+      updatedAt: new Date().toISOString(),
+    });
+
+    res.json({ success: true, message: 'Password changed successfully.' });
+  } catch (err) {
+    console.error('Change password error:', err);
+    next(err);
+  }
+}
 
 
-module.exports = { register, login,getProfile, refreshToken, bulkRegister,  forgotPassword, resetPassword,verifyMfa, enableAppMfa, verifyAppMfaSetup, toggleEmailMfa,disableAllMfa,  };
+
+module.exports = { register, login,getProfile, changePassword, refreshToken, bulkRegister,  forgotPassword, resetPassword,verifyMfa, enableAppMfa, verifyAppMfaSetup, toggleEmailMfa,disableAllMfa,  };
