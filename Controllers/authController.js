@@ -800,11 +800,15 @@ async function disableAllMfa(req, res, next) {
     next(err);
   }
 }
-
 async function verifyMfa(req, res, next) {
   try {
-    const { userId: bodyUserId, code } = req.body;
+    const { userId: bodyUserId, code: bodyCode, token } = req.body;
+    const code = bodyCode || token; // accept either
     const userId = String(bodyUserId || req.user._id || req.user.id);
+
+    if (!code) {
+      return res.status(400).json({ success: false, message: 'MFA code is required' });
+    }
 
     const user = await User.findById(userId);
     if (!user || !user.mfaEmailEnabled)
@@ -818,13 +822,13 @@ async function verifyMfa(req, res, next) {
 
     await User.update(user._id, { mfaCode: null, mfaCodeExpires: null });
 
-    const token = jwt.sign(
+    const tokenJwt = jwt.sign(
       { id: user._id, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
     );
 
-    res.json({ success: true, message: 'MFA verified successfully', token });
+    res.json({ success: true, message: 'MFA verified successfully', token: tokenJwt });
   } catch (err) {
     next(err);
   }
