@@ -723,20 +723,19 @@ async function resetPassword(req, res, next) {
   }
 }
 
-
 async function enableAppMfa(req, res, next) {
   try {
-    const userId = req.user.id; // make sure this is the DynamoDB _id
+    const userId = req.user.id; // must be DynamoDB _id
     const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
 
     const secret = generateTotpSecret(user.email);
-
-    // Generate QR Code
     const qrCodeDataURL = await generateTotpQrCode(secret);
 
-    // Save secret temporarily (not fully enabled until verified)
-    await User.update(user._id, { // <-- use _id
+    await User.update(user._id, { // safe: _id exists
       mfaAppEnabled: true,
       mfaSecret: secret.base32,
       mfaEnabled: true,
@@ -750,7 +749,8 @@ async function enableAppMfa(req, res, next) {
       base32Secret: secret.base32,
     });
   } catch (err) {
-    next(err);
+    console.error('enableAppMfa error:', err);
+    res.status(500).json({ success: false, message: err.message });
   }
 }
 
