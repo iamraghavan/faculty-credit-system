@@ -31,31 +31,15 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(helmet());
 // app.use(cors());
 
-
-// Allow all origins (or restrict to your frontend domains)
+// Allow all origins
 app.use(cors({
-  origin: function(origin, callback) {
-    if (!origin) return callback(null, true); // allow curl/Postman
-    // Allow your main domain + all cloudworkstations.dev subdomains
-    const allowedOrigins = [
-      'https://fcs.egspgroup.in',
-      /\.cloudworkstations\.dev$/
-    ];
-
-    const isAllowed = allowedOrigins.some(o => 
-      typeof o === 'string' ? origin === o : o.test(origin)
-    );
-
-    if (isAllowed) return callback(null, true);
-
-    callback(new Error('Not allowed by CORS'));
-  },
+  origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
+  credentials: false // cannot be true when origin is '*'
 }));
 
-// Handle preflight OPTIONS requests for all routes
+// Handle preflight OPTIONS requests
 app.options('*', cors());
 
 app.use(mongoSanitize());
@@ -71,10 +55,10 @@ app.use(healthRouter);
 // Rate limiting
 app.use(rateLimitMiddleware);
 
-// // Redirect root and /login routes
-// app.get(['/', '/login'], (req, res) => {
-//   res.redirect('https://fcs.egspgroup.in/u/portal/auth?faculty_login');
-// });
+// Redirect root and /login routes
+app.get(['/', '/login'], (req, res) => {
+  res.redirect('https://fcs.egspgroup.in/u/portal/auth?faculty_login');
+});
 
 // API routes
 app.get('/health', (req, res) =>
