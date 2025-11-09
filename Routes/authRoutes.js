@@ -21,10 +21,10 @@ router.post('/users/bulk-upload', authMiddleware, adminOnly, upload.single('file
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password/:token', resetPassword);
 
-router.post('/mfa/enable-app', authMiddleware, enableAppMfa);
-router.post('/mfa/verify-app-setup', authMiddleware, verifyAppMfaSetup);
-router.post('/mfa/toggle-email', authMiddleware, toggleEmailMfa);
-router.post('/mfa/disable-all', authMiddleware, disableAllMfa);
-router.post('/verify-mfa', verifyMfa);
+// router.post('/mfa/enable-app', authMiddleware, enableAppMfa);
+// router.post('/mfa/verify-app-setup', authMiddleware, verifyAppMfaSetup);
+// router.post('/mfa/toggle-email', authMiddleware, toggleEmailMfa);
+// router.post('/mfa/disable-all', authMiddleware, disableAllMfa);
+// router.post('/verify-mfa', verifyMfa);
 
 module.exports = router;
