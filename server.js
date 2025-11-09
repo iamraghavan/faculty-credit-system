@@ -20,50 +20,30 @@ const healthRouter = require('./Routes/health');
 
 const app = express();
 
-// 👇 Trust proxy (for Nginx / Vercel / etc.)
+// 👇 Trust proxy (for Vercel / Nginx / etc.)
 app.set('trust proxy', 1);
 
 // Body parsers
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// --- ✅ CORS configuration ---
-const allowedDomains = [
-  'https://fcs.egspgroup.in', // main production site
-  /\.cloudworkstations\.dev$/, // allow ANY subdomain of cloudworkstations.dev
-];
-
+// --- ✅ OPEN CORS CONFIGURATION (Allow everything) ---
 app.use(cors({
-  origin: function (origin, callback) {
-    // allow requests with no origin (e.g. curl, Postman)
-    if (!origin) return callback(null, true);
-
-    const isAllowed = allowedDomains.some((domain) => {
-      if (typeof domain === 'string') return origin === domain;
-      if (domain instanceof RegExp) return domain.test(origin);
-      return false;
-    });
-
-    if (isAllowed) {
-      return callback(null, true);
-    } else {
-      console.warn(`🚫 Blocked by CORS: ${origin}`);
-      return callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: true, // Reflects request origin automatically
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-// ✅ Important: handle preflight requests explicitly
-app.options('*', cors());
+// ✅ Preflight requests (use string '/.*' instead of '*' to avoid path-to-regexp error)
+app.options('/api/*', cors());
+app.options('/health', cors());
 
 // --- Security Middleware ---
 app.use(helmet());
 app.use(mongoSanitize());
 
-// --- Logging (only in dev) ---
+// --- Logging ---
 if (process.env.NODE_ENV !== 'production') {
   app.use(morgan('dev'));
 }
@@ -74,7 +54,7 @@ app.use(healthRouter);
 // --- Rate Limiting ---
 app.use(rateLimitMiddleware);
 
-// --- Root Redirect ---
+// --- Redirect root and /login ---
 app.get(['/', '/login'], (req, res) => {
   res.redirect('https://fcs.egspgroup.in/u/portal/auth?faculty_login');
 });
@@ -92,7 +72,7 @@ app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/conversations', conversationRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 
-// --- Global Error Handler ---
+// --- Error Handler ---
 app.use(errorHandler);
 
 module.exports = app;
