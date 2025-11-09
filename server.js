@@ -17,6 +17,7 @@ const adminRoutes = require('./Routes/adminRoutes');
 const conversationRoutes = require('./Routes/conversations');
 const notificationRoutes = require('./Routes/notificationRoutes');
 const healthRouter = require('./Routes/health');
+const analyticsRouter = require('./Routes/analyticsRoutes');
 
 const app = express();
 
@@ -59,6 +60,8 @@ app.use('/api/v1/credits', creditRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/conversations', conversationRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
+app.use('/api/v1/analytics',analyticsRouter);
+
 
 // Error handling middleware
 app.use(errorHandler);
