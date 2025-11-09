@@ -35,9 +35,9 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-// ✅ Preflight requests (use string '/.*' instead of '*' to avoid path-to-regexp error)
-app.options('/api/*', cors());
-app.options('/health', cors());
+
+// Handle all OPTIONS preflight requests
+app.options('*', cors());
 
 // --- Security Middleware ---
 app.use(helmet());
