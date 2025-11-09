@@ -12,6 +12,8 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 const crypto = require('crypto');
 const fs = require('fs').promises;
 const path = require('path');
+
+const { generateTotpSecret, generateTotpQrCode, verifyTotpToken, generateMfaCode, sendMfaEmail  } = require('../utils/mfa');
 /**
  * Register a new user (DynamoDB version)
  */
@@ -104,11 +106,11 @@ async function register(req, res, next) {
  */
 async function login(req, res, next) {
   try {
-    const { email, password } = req.body;
+    const { email, password, token: mfaToken } = req.body;
     if (!email || !password)
       return res.status(400).json({ success: false, message: 'Missing credentials' });
 
-    const users = await User.find({ email });
+    const users = await User.find({ email: email.toLowerCase() });
     if (users.length === 0)
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
 
@@ -117,41 +119,135 @@ async function login(req, res, next) {
     if (!match)
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
 
-    // Recalculate credits only for faculty
-    if (user.role === 'faculty') {
-      try {
-        await recalcFacultyCredits(user._id);
-      } catch (err) {
-        console.error('Credit recalculation failed', err);
-      }
-    }
-
-    const token = jwt.sign(
-      { id: user._id, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
-    );
-
     const freshUser = await User.findById(user._id);
 
-    res.json({
-      success: true,
-      data: {
-        id: freshUser._id,
-        name: freshUser.name,
-        facultyID: freshUser.facultyID,
-        apiKey: freshUser.apiKey,
-        role: freshUser.role,
-        department: freshUser.department,
-        currentCredit: freshUser.currentCredit,
-        creditsByYear: freshUser.creditsByYear,
-        token,
-      },
-    });
+    // 🔸 If MFA is NOT enabled — issue token directly
+    if (!user.mfaEnabled) {
+      const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
+        expiresIn: process.env.JWT_EXPIRES_IN || '1h',
+      });
+
+      return res.json({
+        success: true,
+        mfaRequired: false,
+        data: {
+          id: freshUser._id,
+          name: freshUser.name,
+          facultyID: freshUser.facultyID,
+          apiKey: freshUser.apiKey,
+          role: freshUser.role,
+          department: freshUser.department,
+          currentCredit: freshUser.currentCredit,
+          creditsByYear: freshUser.creditsByYear,
+          token,
+        },
+      });
+    }
+
+    // 🔸 If App-based MFA is enabled and token provided
+    if (mfaToken && user.mfaAppEnabled) {
+      const valid = verifyTotpToken(user.mfaSecret, mfaToken);
+      if (!valid)
+        return res.status(400).json({ success: false, message: 'Invalid MFA code' });
+
+      const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
+        expiresIn: process.env.JWT_EXPIRES_IN || '1h',
+      });
+
+      return res.json({
+        success: true,
+        mfaRequired: false,
+        message: 'MFA verified (App)',
+        data: {
+          id: freshUser._id,
+          name: freshUser.name,
+          facultyID: freshUser.facultyID,
+          apiKey: freshUser.apiKey,
+          role: freshUser.role,
+          department: freshUser.department,
+          currentCredit: freshUser.currentCredit,
+          creditsByYear: freshUser.creditsByYear,
+          token,
+        },
+      });
+    }
+
+    // 🔸 If Email-based MFA enabled (send code)
+    if (user.mfaEmailEnabled) {
+      const code = generateMfaCode();
+      const expires = Date.now() + 5 * 60 * 1000;
+      await User.update(user._id, { mfaCode: code, mfaCodeExpires: expires });
+      await sendMfaEmail(user, code);
+
+      return res.json({
+        success: true,
+        mfaRequired: true,
+        mfaType: 'email',
+        userId: user._id,
+        message: 'Email MFA code sent. Please verify with /verify-mfa endpoint.',
+        data: {
+          id: freshUser._id,
+          name: freshUser.name,
+          facultyID: freshUser.facultyID,
+          apiKey: freshUser.apiKey,
+          role: freshUser.role,
+          department: freshUser.department,
+          currentCredit: freshUser.currentCredit,
+          creditsByYear: freshUser.creditsByYear,
+        },
+      });
+    }
+
+    // 🔸 If only App-based MFA is on but no token sent yet
+    if (user.mfaAppEnabled && !mfaToken) {
+      return res.json({
+        success: true,
+        mfaRequired: true,
+        mfaType: 'app',
+        message: 'App-based MFA required. Please provide code from your authenticator app.',
+        data: {
+          id: freshUser._id,
+          name: freshUser.name,
+          facultyID: freshUser.facultyID,
+          apiKey: freshUser.apiKey,
+          role: freshUser.role,
+          department: freshUser.department,
+          currentCredit: freshUser.currentCredit,
+          creditsByYear: freshUser.creditsByYear,
+        },
+      });
+    }
+
   } catch (err) {
     next(err);
   }
 }
+
+async function verifyMfa(req, res, next) {
+  try {
+    const { userId, code } = req.body;
+    const user = await User.findById(userId);
+    if (!user || !user.mfaEmailEnabled)
+      return res.status(400).json({ success: false, message: 'MFA not enabled or user invalid' });
+
+    if (!user.mfaCode || Date.now() > user.mfaCodeExpires)
+      return res.status(400).json({ success: false, message: 'MFA code expired' });
+
+    if (String(user.mfaCode) !== String(code))
+      return res.status(400).json({ success: false, message: 'Invalid MFA code' });
+
+    await User.update(userId, { mfaCode: null, mfaCodeExpires: null });
+
+    const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
+      expiresIn: process.env.JWT_EXPIRES_IN || '1h',
+    });
+
+    res.json({ success: true, message: 'MFA verified successfully', token });
+  } catch (err) {
+    next(err);
+  }
+}
+
 
 /**
  * Refresh token
@@ -499,14 +595,14 @@ async function forgotPassword(req, res, next) {
       resetPasswordExpires: resetExpires,
     });
 
-    const resetUrl = `${process.env.FRONTEND_URL || 'https://fcs.egspgroup.in/u/portal/auth/reset-password'}/reset-password/${resetToken}`;
+    const resetUrl = `${process.env.FRONTEND_URL || 'https://fcs.egspgroup.in/u/portal/auth'}/reset-password/${resetToken}`;
 
     const mailOptions = {
   to: user.email,
-  subject: 'Password Reset - Faculty Credit System',
+  subject: 'Password Reset - CreditWise - EGSPGOI',
   text: `Hello ${user.name},
 
-We received a request to reset your password for the Faculty Credit System.
+We received a request to reset your password for the CreditWise.
 
 Click the link below to reset your password:
 ${resetUrl}
@@ -609,7 +705,7 @@ async function resetPassword(req, res, next) {
 
     const mailOptions = {
       to: user.email,
-      subject: 'Your password has been changed',
+      subject: 'CreditWise - Your password has been changed',
       text: `Hello ${user.name},\n\nYour password has been successfully reset.\nIf you did not perform this action, please contact support immediately.`,
       html: `<p>Hello ${user.name},</p>
 <p>Your password has been successfully reset.</p>
@@ -628,4 +724,85 @@ async function resetPassword(req, res, next) {
 }
 
 
-module.exports = { register, login, refreshToken, bulkRegister,  forgotPassword, resetPassword,  };
+async function enableAppMfa(req, res, next) {
+  try {
+    const userId = req.user.id;
+    const secret = generateTotpSecret(req.user.email);
+
+    // Generate QR Code
+    const qrCodeDataURL = await generateTotpQrCode(secret);
+
+    // Save secret temporarily (not fully enabled until verified)
+    await User.update(userId, {
+      mfaAppEnabled: true,
+      mfaSecret: secret.base32,
+      mfaEnabled: true,
+    });
+
+    res.json({
+      success: true,
+      message: 'Scan this QR code in your Authenticator app.',
+      qrCodeDataURL,
+      base32Secret: secret.base32,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function verifyAppMfaSetup(req, res, next) {
+  try {
+    const { token } = req.body;
+    const userId = req.user.id;
+    const user = await User.findById(userId);
+
+    if (!user.mfaSecret) {
+      return res.status(400).json({ success: false, message: 'MFA secret not found' });
+    }
+
+    const valid = verifyTotpToken(user.mfaSecret, token);
+    if (!valid) {
+      return res.status(400).json({ success: false, message: 'Invalid or expired TOTP code' });
+    }
+
+    await User.update(userId, { mfaAppEnabled: true, mfaEnabled: true });
+    res.json({ success: true, message: 'App-based MFA successfully verified and enabled' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function toggleEmailMfa(req, res, next) {
+  try {
+    const { enable } = req.body;
+    const userId = req.user.id;
+
+    await User.update(userId, {
+      mfaEmailEnabled: !!enable,
+      mfaEnabled: !!enable, // if disabling both, handle separately
+    });
+
+    res.json({ success: true, message: `Email-based MFA ${enable ? 'enabled' : 'disabled'}` });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function disableAllMfa(req, res, next) {
+  try {
+    const userId = req.user.id;
+    await User.update(userId, {
+      mfaEnabled: false,
+      mfaEmailEnabled: false,
+      mfaAppEnabled: false,
+      mfaSecret: null,
+      mfaCode: null,
+      mfaCodeExpires: null,
+    });
+    res.json({ success: true, message: 'All MFA disabled' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { register, login, refreshToken, bulkRegister,  forgotPassword, resetPassword,verifyMfa, enableAppMfa, verifyAppMfaSetup, toggleEmailMfa,disableAllMfa,  };

@@ -29,6 +29,15 @@ module.exports = {
       resetPasswordToken: data.resetPasswordToken || null,
       resetPasswordExpires: data.resetPasswordExpires || null,
 
+      mfaEnabled: data.mfaEnabled ?? false,        // true if any MFA enabled
+mfaEmailEnabled: data.mfaEmailEnabled ?? false,
+mfaAppEnabled: data.mfaAppEnabled ?? false,
+
+mfaSecret: data.mfaSecret || null,           // for TOTP (app-based)
+mfaCode: data.mfaCode || null,               // for email MFA
+mfaCodeExpires: data.mfaCodeExpires || null, // for email MFA
+
+
       ...data,
     };
 

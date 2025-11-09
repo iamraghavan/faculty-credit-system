@@ -29,7 +29,38 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Security & sanitization
 app.use(helmet());
-app.use(cors());
+
+
+// --- CORS configuration ---
+const allowedDomains = [
+  'https://fcs.egspgroup.in', // your main site
+  /\.cloudworkstations\.dev$/, // allow any subdomain like *.cloudworkstations.dev
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+
+    // Check if origin matches any allowed domain or pattern
+    const isAllowed = allowedDomains.some((domain) => {
+      if (typeof domain === 'string') return origin === domain;
+      if (domain instanceof RegExp) return domain.test(origin);
+      return false;
+    });
+
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.warn(`🚫 Blocked by CORS: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+}));
+
+
 app.use(mongoSanitize());
 
 // Logging
