@@ -29,25 +29,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Security & sanitization
 app.use(helmet());
-
-app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-    const isAllowed = allowedDomains.some((domain) =>
-      typeof domain === 'string' ? origin === domain : domain.test(origin)
-    );
-    if (isAllowed) return callback(null, true);
-    console.warn(`🚫 Blocked by CORS: ${origin}`);
-    return callback(new Error('Not allowed by CORS'));
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],   // ✅ added this
-}));
-app.options('*', cors()); // ✅ handles preflight
-
-
-
+app.use(cors());
 app.use(mongoSanitize());
 
 // Logging
