@@ -74,7 +74,7 @@ router.get('/credits/negative/:id/faculty', adminGetFacultyByNegativeCreditId);
 sss
 
 
-router.get('/credits/negative/appeals/', getNegativeAppeals);
+router.get('/credits/negative/appeals', getNegativeAppeals);
 
 
 // Get appeal details by creditId
