@@ -71,10 +71,10 @@ router.get('/credits/negative/:id', adminGetNegativeCreditById);
 
 // GET /api/v1/admin/credits/negative/:id/faculty
 router.get('/credits/negative/:id/faculty', adminGetFacultyByNegativeCreditId);
+sss
 
 
-
-router.get('/credits/negative/appeals/all', getNegativeAppeals);
+router.get('/credits/negative/appeals/', getNegativeAppeals);
 
 
 // Get appeal details by creditId
@@ -84,7 +84,7 @@ router.get('/credits/negative/:creditId/appeal', authMiddleware, adminOnly, admi
 router.put('/credits/negative/:creditId/appeal', authMiddleware, adminOnly, adminUpdateAppealStatus);
 
 // Admin: list all negative appeals
-router.get('/credits/negative/appeals', authMiddleware, adminOnly, adminListNegativeCreditAppeals);
+router.get('/credits/negative/appeals/all', authMiddleware, adminOnly, adminListNegativeCreditAppeals);
 
 
 module.exports = router;
