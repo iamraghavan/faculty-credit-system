@@ -659,34 +659,172 @@ async function adminListNegativeCreditAppeals(req, res, next) {
   }
 }
 
+
 /**
- * Get negative appeals (Dynamo)
+ * ADMIN: Get all negative credit appeals (Dynamo)
+ * GET /api/v1/admin/credits/negative/appeals
  */
-async function getNegativeAppeals(req, res) {
+async function getNegativeAppeals(req, res, next) {
   try {
     await ensureDb();
 
-    const negativeAppeals = (await Credit.find({ type: 'negative' }))
-      .filter(c => c.appeal && ['pending', 'accepted', 'rejected'].includes(String(c.appeal.status || '').toLowerCase()))
-      .map(c => ({
-        faculty: c.facultySnapshot || null,
-        creditId: c._id,
-        title: c.title,
-        points: c.points,
-        categories: c.categories,
-        proofUrl: c.proofUrl,
-        appeal: c.appeal,
-        status: c.status,
-        createdAt: c.createdAt,
-      }));
+    const {
+      page = 1,
+      limit = 20,
+      academicYear = 'all',
+      status = 'all', // main credit status
+      appealStatus = 'all', // appeal status: pending/accepted/rejected
+      facultyId,
+      templateId = 'all',
+      college = 'all',
+      department = 'all',
+      sort = '-createdAt',
+      search = ''
+    } = req.query;
 
-    if (negativeAppeals.length === 0) {
-      return res.status(404).json({ message: 'No negative appeals found' });
+    // 1️⃣ Base filter for negative credits
+    const baseFilter = { type: 'negative' };
+    if (academicYear.toLowerCase() !== 'all') baseFilter.academicYear = academicYear.trim();
+    if (facultyId) baseFilter.faculty = facultyId.trim();
+
+    // 2️⃣ Fetch all credits
+    let credits = await Credit.find(baseFilter);
+
+    // 3️⃣ Filter to only those with appeals
+    let items = credits.filter(
+      c =>
+        c.appeal &&
+        ['pending', 'accepted', 'rejected'].includes(String(c.appeal.status || '').toLowerCase())
+    );
+
+    // 4️⃣ Filter by appeal status
+    if (appealStatus.toLowerCase() !== 'all') {
+      items = items.filter(
+        c => String(c.appeal.status || '').toLowerCase() === appealStatus.toLowerCase()
+      );
     }
-    return res.status(200).json({ negativeAppeals });
+
+    // 5️⃣ Filter by credit status
+    if (status.toLowerCase() !== 'all') {
+      const allowed = ['pending', 'approved', 'rejected', 'appealed'];
+      if (!allowed.includes(status.toLowerCase())) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid status. Allowed: ${allowed.join(', ')}`
+        });
+      }
+      items = items.filter(c => String(c.status || '').toLowerCase() === status.toLowerCase());
+    }
+
+    // 6️⃣ Filter by template / credit title
+    if (templateId.toLowerCase() !== 'all') {
+      items = items.filter(c => String(c.creditTitle) === String(templateId));
+    }
+
+    // 7️⃣ Filter by college / department (from facultySnapshot)
+    if (college.toLowerCase() !== 'all') {
+      items = items.filter(
+        c =>
+          String(c.facultySnapshot?.college || '').toLowerCase() === college.toLowerCase()
+      );
+    }
+    if (department.toLowerCase() !== 'all') {
+      items = items.filter(
+        c =>
+          String(c.facultySnapshot?.department || '').toLowerCase() ===
+          department.toLowerCase()
+      );
+    }
+
+    // 8️⃣ Text search (faculty, title, notes)
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      items = items.filter(c => {
+        const fields = [
+          c.title,
+          c.notes,
+          c.creditTitle,
+          c.facultySnapshot?.name,
+          c.facultySnapshot?.facultyID,
+          c.appeal?.reason
+        ];
+        return fields.some(f => String(f || '').toLowerCase().includes(q));
+      });
+    }
+
+    // 9️⃣ Sort
+    const desc = String(sort).startsWith('-');
+    const sortKey = desc ? sort.slice(1) : sort;
+    items.sort((a, b) => {
+      const va = a[sortKey] || '';
+      const vb = b[sortKey] || '';
+      return desc
+        ? String(vb).localeCompare(String(va))
+        : String(va).localeCompare(String(vb));
+    });
+
+    // 🔟 Pagination
+    const total = items.length;
+    const skip = (Math.max(Number(page), 1) - 1) * Math.max(Number(limit), 1);
+    const paged = items.slice(skip, skip + Math.max(Number(limit), 1));
+
+    // 1️⃣1️⃣ Format data
+    const formattedItems = paged.map(c => ({
+      creditId: c._id,
+      _id: c._id, // explicitly include credit _id for consistency
+      title: c.title || '',
+      creditTitle: c.creditTitle || '',
+      type: c.type || '',
+      points: c.points || 0,
+      categories: c.categories || [],
+      proofMeta: c.proofMeta || null,
+      proofUrl: c.proofUrl || '',
+      issuedBy: c.issuedBy || '',
+      status: c.status || '',
+      academicYear: c.academicYear || '',
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+
+      // Faculty Info
+      faculty: {
+        name: c.facultySnapshot?.name || '',
+        facultyID: c.facultySnapshot?.facultyID || '',
+        college: c.facultySnapshot?.college || '',
+        department: c.facultySnapshot?.department || '',
+        email: c.facultySnapshot?.email || ''
+      },
+
+      // Appeal Info
+      appeal: {
+        status: c.appeal?.status || '',
+        reason: c.appeal?.reason || '',
+        submittedAt: c.appeal?.submittedAt || '',
+        response: c.appeal?.response || '',
+        reviewedBy: c.appeal?.reviewedBy || '',
+        updatedAt: c.appeal?.updatedAt || ''
+      }
+    }));
+
+    // 1️⃣2️⃣ Build distinct dropdown values for frontend
+    const distinctValues = {
+      templates: [...new Set(credits.map(i => i.creditTitle).filter(Boolean))],
+      years: [...new Set(credits.map(i => i.academicYear).filter(Boolean))],
+      colleges: [...new Set(credits.map(i => i.facultySnapshot?.college).filter(Boolean))],
+      departments: [...new Set(credits.map(i => i.facultySnapshot?.department).filter(Boolean))]
+    };
+
+    // ✅ Final response
+    return res.json({
+      success: true,
+      total,
+      page: Number(page),
+      limit: Number(limit),
+      filters: distinctValues,
+      items: formattedItems
+    });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ message: 'Server error', error: err.message });
+    return res.status(500).json({ success: false, message: 'Server error', error: err.message });
   }
 }
 
