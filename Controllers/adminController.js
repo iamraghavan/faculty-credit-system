@@ -425,62 +425,133 @@ async function adminListNegativeCredits(req, res, next) {
     const {
       page = 1,
       limit = 20,
-      academicYear,
-      status,
+      academicYear = 'all',
+      status = 'all',
       facultyId,
+      templateId,
+      college = 'all',
+      department = 'all',
       sort = '-createdAt',
-      search
+      search = ''
     } = req.query;
 
-    // Base filter
+    // 1️⃣ Base filter
     const baseFilter = { type: 'negative' };
-    if (academicYear && String(academicYear).trim().toLowerCase() !== 'all') baseFilter.academicYear = String(academicYear).trim();
-    if (facultyId) baseFilter.faculty = String(facultyId);
 
-    // initial fetch
+    if (academicYear.toLowerCase() !== 'all')
+      baseFilter.academicYear = String(academicYear).trim();
+
+    if (facultyId)
+      baseFilter.faculty = String(facultyId).trim();
+
+    // 2️⃣ Fetch all credits
     let items = await Credit.find(baseFilter);
 
-    // status filter
-    if (status && String(status).trim().toLowerCase() !== 'all') {
-      const s = String(status).trim().toLowerCase();
+    // 3️⃣ Filter by status
+    if (status.toLowerCase() !== 'all') {
       const allowed = ['pending', 'approved', 'rejected', 'appealed'];
+      const s = status.trim().toLowerCase();
       if (!allowed.includes(s)) {
-        return res.status(400).json({ success: false, message: `Invalid status. Allowed: ${allowed.join(', ')}` });
+        return res.status(400).json({
+          success: false,
+          message: `Invalid status. Allowed: ${allowed.join(', ')}`
+        });
       }
       items = items.filter(it => String(it.status || '').toLowerCase() === s);
     }
 
-    // search filter
-    if (search) {
-      const q = String(search).trim().toLowerCase();
+    // 4️⃣ Filter by template / credit title
+    if (templateId && templateId.toLowerCase() !== 'all') {
+      items = items.filter(it => String(it.creditTitle) === String(templateId));
+    }
+
+    // 5️⃣ Filter by college / department (from faculty snapshot)
+    if (college.toLowerCase() !== 'all') {
+      items = items.filter(it =>
+        String(it.facultySnapshot?.college || '').toLowerCase() === college.toLowerCase()
+      );
+    }
+
+    if (department.toLowerCase() !== 'all') {
+      items = items.filter(it =>
+        String(it.facultySnapshot?.department || '').toLowerCase() === department.toLowerCase()
+      );
+    }
+
+    // 6️⃣ Text search across multiple fields
+    if (search.trim()) {
+      const q = search.toLowerCase();
       items = items.filter(it => {
-        const title = String(it.title || '').toLowerCase();
-        const notes = String(it.notes || '').toLowerCase();
-        const fname = String(it.facultySnapshot?.name || '').toLowerCase();
-        const fid = String(it.facultySnapshot?.facultyID || '').toLowerCase();
-        return title.includes(q) || notes.includes(q) || fname.includes(q) || fid.includes(q);
+        const fields = [
+          it.title,
+          it.notes,
+          it.facultySnapshot?.name,
+          it.facultySnapshot?.facultyID,
+          it.creditTitle
+        ];
+        return fields.some(f => String(f || '').toLowerCase().includes(q));
       });
     }
 
-    // sort
+    // 7️⃣ Sort (default: newest first)
     const desc = String(sort).startsWith('-');
     const sortKey = desc ? sort.slice(1) : sort;
     items.sort((a, b) => {
       const va = a[sortKey] || '';
       const vb = b[sortKey] || '';
-      return desc ? String(vb).localeCompare(String(va)) : String(va).localeCompare(String(vb));
+      return desc
+        ? String(vb).localeCompare(String(va))
+        : String(va).localeCompare(String(vb));
     });
 
+    // 8️⃣ Pagination
     const total = items.length;
     const skip = (Math.max(Number(page), 1) - 1) * Math.max(Number(limit), 1);
     const paged = items.slice(skip, skip + Math.max(Number(limit), 1));
 
+    // 9️⃣ Enrich results with related info
+    // (Optional: can fetch faculty/title info dynamically)
+    const formattedItems = paged.map(it => ({
+  creditId: it._id,
+  // 🧑‍🏫 Faculty details
+  facultyName: it.facultySnapshot?.name || '',
+  facultyID: it.facultySnapshot?.facultyID || '',
+  college: it.facultySnapshot?.college || '',
+  department: it.facultySnapshot?.department || '',
+
+  // 🧾 Credit info
+  templateTitle: it.creditTitle || '',
+  title: it.title || '',
+  type: it.type || '',
+  points: it.points || 0,
+  status: it.status || '',
+  issuedBy: it.issuedBy || '',
+  proofMeta: it.proofMeta || null,
+  proofUrl: it.proofUrl || '',
+
+  // 📅 Timestamps
+  createdAt: it.createdAt,
+  updatedAt: it.updatedAt,
+
+  // keep all original fields if frontend still needs them
+  ...it
+}));
+    // 🔹 Optional: Distinct filter options for frontend dropdowns
+    const distinctValues = {
+      templates: [...new Set(items.map(i => i.creditTitle).filter(Boolean))],
+      years: [...new Set(items.map(i => i.academicYear).filter(Boolean))],
+      colleges: [...new Set(items.map(i => i.facultySnapshot?.college).filter(Boolean))],
+      departments: [...new Set(items.map(i => i.facultySnapshot?.department).filter(Boolean))]
+    };
+
+    // ✅ Response
     return res.json({
       success: true,
       total,
       page: Number(page),
       limit: Number(limit),
-      items: paged,
+      filters: distinctValues, // new addition for UI dropdowns
+      items: formattedItems
     });
   } catch (err) {
     next(err);
