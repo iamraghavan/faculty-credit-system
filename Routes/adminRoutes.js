@@ -71,7 +71,7 @@ router.get('/credits/negative/:id', adminGetNegativeCreditById);
 
 // GET /api/v1/admin/credits/negative/:id/faculty
 router.get('/credits/negative/:id/faculty', adminGetFacultyByNegativeCreditId);
-sss
+
 
 
 router.get('/credits/negative/appeals', getNegativeAppeals);
