@@ -273,65 +273,143 @@ async function listNegativeCreditsForFaculty(req, res, next) {
  * NOTE: Credit.find performs a full table scan and returns items filtered in-memory.
  * For production, create a GSI on (type, faculty) or similar and implement query.
  */
+
 async function listPositiveCreditsForAdmin(req, res, next) {
   try {
     await ensureDb();
 
-    const { status, facultyId, academicYear, fromDate, toDate, page = 1, limit = 20, sort = '-createdAt', search } = req.query;
+    // Supported query params:
+    // status (comma separated),
+    // facultyId,
+    // academicYear,
+    // fromDate (ISO),
+    // toDate (ISO),
+    // pointsMin, pointsMax,
+    // categories (comma separated),
+    // creditTitle,
+    // issuedBy,
+    // hasProof (true/false),
+    // search (string),
+    // limit (number, recommended, default 20),
+    // lastKey (cursor for Dynamo pagination; base64),
+    // sort (e.g. -createdAt or points or title),
+    // page (legacy page-based pagination; not recommended for large tables)
+    const {
+      status,
+      facultyId,
+      academicYear,
+      fromDate,
+      toDate,
+      pointsMin,
+      pointsMax,
+      categories,
+      creditTitle,
+      issuedBy,
+      hasProof,
+      search,
+      limit = 20,
+      lastKey,
+      sort = '-createdAt',
+      page, // legacy: integer page number (1-based)
+    } = req.query;
 
-    // Build filter object for Credit.find (equality checks). Complex filters (regex, date ranges) will be applied in-memory after scan.
-    const baseFilter = { type: 'positive' };
-    if (facultyId) baseFilter.faculty = String(facultyId);
-    if (academicYear) baseFilter.academicYear = String(academicYear);
+    // Build filter object to pass to model
+    const filter = {
+      type: 'positive', // always positive credits
+    };
 
-    // initial fetch (scan+filter)
-    let items = await Credit.find(baseFilter);
+    if (facultyId) filter.faculty = String(facultyId);
+    if (academicYear) filter.academicYear = String(academicYear);
 
-    // in-memory filters:
-    if (status) {
-      const wanted = status.split(',').map(s => s.trim().toLowerCase());
-      items = items.filter(it => wanted.includes(String(it.status || '').toLowerCase()));
-    }
+    // Additional filters handled by findAdvanced
+    const advanced = {
+      status: status ? status.split(',').map(s => s.trim().toLowerCase()) : undefined,
+      fromDate: fromDate ? new Date(fromDate).toISOString() : undefined,
+      toDate: toDate ? new Date(toDate).toISOString() : undefined,
+      pointsMin: pointsMin ? Number(pointsMin) : undefined,
+      pointsMax: pointsMax ? Number(pointsMax) : undefined,
+      categories: categories ? categories.split(',').map(c => c.trim()) : undefined,
+      creditTitle: creditTitle ? String(creditTitle) : undefined,
+      issuedBy: issuedBy ? String(issuedBy) : undefined,
+      hasProof: typeof hasProof !== 'undefined' ? (String(hasProof) === 'true') : undefined,
+      search: search ? String(search).trim() : undefined,
+    };
 
-    if (fromDate || toDate) {
-      items = items.filter(it => {
-        const created = it.createdAt ? new Date(it.createdAt) : null;
-        if (!created) return false;
-        if (fromDate && created < new Date(fromDate)) return false;
-        if (toDate && created > new Date(toDate)) return false;
-        return true;
-      });
-    }
+    const opts = {
+      limit: Math.max(1, Math.min(1000, Number(limit) || 20)), // cap limit to avoid huge scans
+      lastKey: lastKey || undefined,
+      // note: a Query with a GSI may support server-side ordering; currently we sort in-memory below
+    };
 
-    if (search) {
-      const q = String(search).trim().toLowerCase();
+    // Ask model for advanced find; it will use Query if it can (GSI), else Scan with FilterExpression.
+    const { items: fetchedItems, lastEvaluatedKey } = await Credit.findAdvanced(filter, advanced, opts);
+
+    // Post-processing: in-memory filtering that cannot be expressed in Dynamo (e.g. case-insensitive fuzzy search across nested fields)
+    let items = fetchedItems || [];
+
+    // Case-insensitive search across title, notes, facultySnapshot.name, facultySnapshot.facultyID
+    if (advanced.search) {
+      const q = advanced.search.toLowerCase();
       items = items.filter(it => {
         const title = String(it.title || '').toLowerCase();
         const notes = String(it.notes || '').toLowerCase();
-        const fname = String(it.facultySnapshot?.name || '').toLowerCase();
-        const fid = String(it.facultySnapshot?.facultyID || '').toLowerCase();
+        const fname = String((it.facultySnapshot && it.facultySnapshot.name) || '').toLowerCase();
+        const fid = String((it.facultySnapshot && it.facultySnapshot.facultyID) || '').toLowerCase();
+        // simple includes; if you want fuzzy matching consider integrating elastic or trigram later
         return title.includes(q) || notes.includes(q) || fname.includes(q) || fid.includes(q);
       });
     }
 
-    // sort
-    const desc = String(sort).startsWith('-');
+    // Additional in-memory filters for status (case-insensitive)
+    if (advanced.status && Array.isArray(advanced.status)) {
+      const wanted = new Set(advanced.status.map(s => s.toLowerCase()));
+      items = items.filter(it => wanted.has(String(it.status || '').toLowerCase()));
+    }
+
+    // Sorting (in-memory). Dynamo cannot sort Scan results; if you create a GSI with a sort key you can Query with order.
+    const desc = String(sort || '').startsWith('-');
     const sortKey = desc ? sort.slice(1) : sort;
     items.sort((a, b) => {
-      const va = a[sortKey] || '';
-      const vb = b[sortKey] || '';
+      const va = a[sortKey] == null ? '' : a[sortKey];
+      const vb = b[sortKey] == null ? '' : b[sortKey];
+
+      // handle numbers vs strings
+      if (typeof va === 'number' || typeof vb === 'number') {
+        return desc ? (Number(vb || 0) - Number(va || 0)) : (Number(va || 0) - Number(vb || 0));
+      }
+      // fallback to localeCompare for strings
       return desc ? String(vb).localeCompare(String(va)) : String(va).localeCompare(String(vb));
     });
 
-    const total = items.length;
-    const skip = (Math.max(Number(page), 1) - 1) * Math.max(Number(limit), 1);
-    const paged = items.slice(skip, skip + Math.max(Number(limit), 1));
+    // Support legacy page/limit pagination if page is specified (not recommended for large tables)
+    let pagedItems = items;
+    let total = items.length;
+    if (typeof page !== 'undefined') {
+      const p = Math.max(1, Number(page) || 1);
+      const lim = Math.max(1, Number(limit) || 20);
+      const start = (p - 1) * lim;
+      pagedItems = items.slice(start, start + lim);
+      total = items.length;
+    } else {
+      // cursor-based: Dynamo provided limited set already; we return items as-is (limited by opts.limit)
+      pagedItems = items;
+      // total unknown without an extra count scan; we set total to paged length (client can iterate using lastKey to fetch more)
+      total = items.length;
+    }
 
-    return res.json({ success: true, total, page: Number(page), limit: Number(limit), items: paged });
+    return res.json({
+      success: true,
+      total,
+      limit: opts.limit,
+      items: pagedItems,
+      lastKey: lastEvaluatedKey ? Buffer.from(JSON.stringify(lastEvaluatedKey)).toString('base64') : null,
+      // Note: when using page-based pagination, lastKey will likely be null here.
+    });
   } catch (err) {
-    next(err);
+    return next(err);
   }
 }
+
 
 /**
  * Positive credit update status (Dynamo)
