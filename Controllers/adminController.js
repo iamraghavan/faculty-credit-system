@@ -268,147 +268,344 @@ async function listNegativeCreditsForFaculty(req, res, next) {
 
 /**
  * Positive credits listing for admin (Dynamo)
- * Query params: status, facultyId, academicYear, fromDate, toDate, page, limit, sort, search
+ * Query params supported:
+ *  - status (comma separated)
+ *  - facultyId
+ *  - academicYear
+ *  - fromDate / toDate  (ISO strings)
+ *  - fromCreatedAt / toCreatedAt (aliases)
+ *  - pointsMin / pointsMax
+ *  - categories (comma separated)
+ *  - hasProof (true|false)
+ *  - hasAppeal (true|false)
+ *  - appealCountMin / appealCountMax
+ *  - issuedBy
+ *  - search (fuzzy across title, creditTitle, notes, facultySnapshot.name, facultySnapshot.facultyID)
+ *  - page, limit
+ *  - sort  (comma separated keys, prefix with - for desc, e.g. "-createdAt,points")
  *
- * NOTE: Credit.find performs a full table scan and returns items filtered in-memory.
- * For production, create a GSI on (type, faculty) or similar and implement query.
+ * NOTE: This currently performs a scan via Credit.find(...) and applies filters in-memory.
+ * For production, create GSIs and push filters to Dynamo queries.
  */
-
 async function listPositiveCreditsForAdmin(req, res, next) {
+  const startTs = Date.now();
   try {
     await ensureDb();
 
-    // Supported query params:
-    // status (comma separated),
-    // facultyId,
-    // academicYear,
-    // fromDate (ISO),
-    // toDate (ISO),
-    // pointsMin, pointsMax,
-    // categories (comma separated),
-    // creditTitle,
-    // issuedBy,
-    // hasProof (true/false),
-    // search (string),
-    // limit (number, recommended, default 20),
-    // lastKey (cursor for Dynamo pagination; base64),
-    // sort (e.g. -createdAt or points or title),
-    // page (legacy page-based pagination; not recommended for large tables)
+    // parse query params with defaults
     const {
       status,
       facultyId,
       academicYear,
       fromDate,
       toDate,
+      fromCreatedAt,
+      toCreatedAt,
       pointsMin,
       pointsMax,
       categories,
-      creditTitle,
-      issuedBy,
       hasProof,
+      hasAppeal,
+      appealCountMin,
+      appealCountMax,
+      issuedBy,
       search,
+      page = 1,
       limit = 20,
-      lastKey,
       sort = '-createdAt',
-      page, // legacy: integer page number (1-based)
+      sortFallback = '_id', // fallback sort key
     } = req.query;
 
-    // Build filter object to pass to model
-    const filter = {
-      type: 'positive', // always positive credits
+    // Build base filter that can be passed to Credit.find (fast equality-able fields)
+    // Keep it minimal to avoid excluding things incorrectly
+    const baseFilter = { type: 'positive' };
+    if (facultyId) baseFilter.faculty = String(facultyId);
+    if (academicYear) baseFilter.academicYear = String(academicYear);
+    if (issuedBy) baseFilter.issuedBy = String(issuedBy);
+
+    // fetch all matching baseFilter (this is a scan under the hood)
+    let items = await Credit.find(baseFilter);
+    items = items || [];
+
+    // normalize helper
+    const parseBool = (v) => {
+      if (v === undefined || v === null) return undefined;
+      if (typeof v === 'boolean') return v;
+      const s = String(v).toLowerCase().trim();
+      if (['true', '1', 'yes', 'y'].includes(s)) return true;
+      if (['false', '0', 'no', 'n'].includes(s)) return false;
+      return undefined;
     };
 
-    if (facultyId) filter.faculty = String(facultyId);
-    if (academicYear) filter.academicYear = String(academicYear);
+    // ------- In-memory filters -------
+    // status (supports multiple: status=pending,approved)
+    if (status) {
+      const wanted = status.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      items = items.filter(it => wanted.includes(String(it.status || '').toLowerCase()));
+    }
 
-    // Additional filters handled by findAdvanced
-    const advanced = {
-      status: status ? status.split(',').map(s => s.trim().toLowerCase()) : undefined,
-      fromDate: fromDate ? new Date(fromDate).toISOString() : undefined,
-      toDate: toDate ? new Date(toDate).toISOString() : undefined,
-      pointsMin: pointsMin ? Number(pointsMin) : undefined,
-      pointsMax: pointsMax ? Number(pointsMax) : undefined,
-      categories: categories ? categories.split(',').map(c => c.trim()) : undefined,
-      creditTitle: creditTitle ? String(creditTitle) : undefined,
-      issuedBy: issuedBy ? String(issuedBy) : undefined,
-      hasProof: typeof hasProof !== 'undefined' ? (String(hasProof) === 'true') : undefined,
-      search: search ? String(search).trim() : undefined,
-    };
-
-    const opts = {
-      limit: Math.max(1, Math.min(1000, Number(limit) || 20)), // cap limit to avoid huge scans
-      lastKey: lastKey || undefined,
-      // note: a Query with a GSI may support server-side ordering; currently we sort in-memory below
-    };
-
-    // Ask model for advanced find; it will use Query if it can (GSI), else Scan with FilterExpression.
-    const { items: fetchedItems, lastEvaluatedKey } = await Credit.findAdvanced(filter, advanced, opts);
-
-    // Post-processing: in-memory filtering that cannot be expressed in Dynamo (e.g. case-insensitive fuzzy search across nested fields)
-    let items = fetchedItems || [];
-
-    // Case-insensitive search across title, notes, facultySnapshot.name, facultySnapshot.facultyID
-    if (advanced.search) {
-      const q = advanced.search.toLowerCase();
+    // createdAt date range (either fromDate/toDate or fromCreatedAt/toCreatedAt)
+    const from = fromDate || fromCreatedAt;
+    const to = toDate || toCreatedAt;
+    if (from || to) {
+      const fromTs = from ? new Date(from) : null;
+      const toTs = to ? new Date(to) : null;
       items = items.filter(it => {
-        const title = String(it.title || '').toLowerCase();
-        const notes = String(it.notes || '').toLowerCase();
-        const fname = String((it.facultySnapshot && it.facultySnapshot.name) || '').toLowerCase();
-        const fid = String((it.facultySnapshot && it.facultySnapshot.facultyID) || '').toLowerCase();
-        // simple includes; if you want fuzzy matching consider integrating elastic or trigram later
-        return title.includes(q) || notes.includes(q) || fname.includes(q) || fid.includes(q);
+        const created = it.createdAt ? new Date(it.createdAt) : null;
+        if (!created) return false;
+        if (fromTs && created < fromTs) return false;
+        if (toTs && created > toTs) return false;
+        return true;
       });
     }
 
-    // Additional in-memory filters for status (case-insensitive)
-    if (advanced.status && Array.isArray(advanced.status)) {
-      const wanted = new Set(advanced.status.map(s => s.toLowerCase()));
-      items = items.filter(it => wanted.has(String(it.status || '').toLowerCase()));
+    // numeric points range
+    if (pointsMin !== undefined || pointsMax !== undefined) {
+      const min = pointsMin !== undefined ? Number(pointsMin) : -Infinity;
+      const max = pointsMax !== undefined ? Number(pointsMax) : Infinity;
+      items = items.filter(it => {
+        const pts = Number(it.points || 0);
+        return !Number.isNaN(pts) && pts >= min && pts <= max;
+      });
     }
 
-    // Sorting (in-memory). Dynamo cannot sort Scan results; if you create a GSI with a sort key you can Query with order.
-    const desc = String(sort || '').startsWith('-');
-    const sortKey = desc ? sort.slice(1) : sort;
-    items.sort((a, b) => {
-      const va = a[sortKey] == null ? '' : a[sortKey];
-      const vb = b[sortKey] == null ? '' : b[sortKey];
+    // categories (comma separated) - checks intersection
+    if (categories) {
+      const wantedCats = categories.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      items = items.filter(it => {
+        const c = it.categories || [];
+        const lower = Array.isArray(c) ? c.map(x => String(x).toLowerCase()) : [String(c).toLowerCase()];
+        return wantedCats.some(w => lower.includes(w));
+      });
+    }
 
-      // handle numbers vs strings
-      if (typeof va === 'number' || typeof vb === 'number') {
-        return desc ? (Number(vb || 0) - Number(va || 0)) : (Number(va || 0) - Number(vb || 0));
+    // proof presence
+    const proofFlag = parseBool(hasProof);
+    if (proofFlag !== undefined) {
+      items = items.filter(it => {
+        const has = !!(it.proofUrl || it.proofMeta);
+        return proofFlag ? has : !has;
+      });
+    }
+
+    // appeals
+    const appealFlag = parseBool(hasAppeal);
+    if (appealFlag !== undefined) {
+      items = items.filter(it => {
+        const has = !!(Array.isArray(it.appeal) ? it.appeal.length > 0 : (it.appealCount && Number(it.appealCount) > 0));
+        return appealFlag ? has : !has;
+      });
+    }
+    if (appealCountMin !== undefined || appealCountMax !== undefined) {
+      const min = appealCountMin !== undefined ? Number(appealCountMin) : -Infinity;
+      const max = appealCountMax !== undefined ? Number(appealCountMax) : Infinity;
+      items = items.filter(it => {
+        const ac = Number(it.appealCount || 0);
+        return !Number.isNaN(ac) && ac >= min && ac <= max;
+      });
+    }
+
+    // search (fuzzy across multiple fields)
+    if (search) {
+      const q = String(search).trim().toLowerCase();
+      items = items.filter(it => {
+        const fields = [
+          String(it.title || ''),
+          String(it.creditTitle || ''),               // if you store title id or name here
+          String(it.creditTitleName || ''),           // alternative field
+          String(it.creditTitle?.title || ''),
+          String(it.creditTitle?.description || ''),
+          String(it.creditTitle?.type || ''),
+          String(it.creditTitle || ''),               // raw title id / text
+          String(it.creditTitle || ''),               // repeat to be safe
+          String(it.creditTitle || ''),
+          String(it.creditTitle || ''),
+          String(it.creditTitle || ''),
+          String(it.creditTitle || '')
+        ].map(s => s.toLowerCase());
+
+        const title = String(it.title || '').toLowerCase();
+        const notes = String(it.notes || '').toLowerCase();
+        const fname = String(it.facultySnapshot?.name || '').toLowerCase();
+        const fid = String(it.facultySnapshot?.facultyID || '').toLowerCase();
+        const issuedByName = String(it.issuedBySnapshot?.name || '').toLowerCase();
+        return (
+          title.includes(q) ||
+          notes.includes(q) ||
+          fname.includes(q) ||
+          fid.includes(q) ||
+          issuedByName.includes(q) ||
+          fields.some(f => f.includes(q))
+        );
+      });
+    }
+
+    // ------- Sorting -------
+    // support multi-key sort like: sort=-createdAt,points,title
+    function makeComparator(sortStr) {
+      const keys = String(sortStr || sortFallback)
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean)
+        .map(s => {
+          const desc = s.startsWith('-');
+          const key = desc ? s.slice(1) : s;
+          return { key, desc };
+        });
+
+      return (a, b) => {
+        for (const { key, desc } of keys) {
+          // handle nested keys like facultySnapshot.name
+          const getv = (obj, k) => {
+            if (!obj) return '';
+            if (k.includes('.')) {
+              return k.split('.').reduce((o, part) => (o ? o[part] : ''), obj) ?? '';
+            }
+            return obj[k] ?? '';
+          };
+          const va = getv(a, key);
+          const vb = getv(b, key);
+
+          // numeric compare when both are numbers
+          const na = typeof va === 'number' ? va : Number(va);
+          const nb = typeof vb === 'number' ? vb : Number(vb);
+          if (!Number.isNaN(na) && !Number.isNaN(nb)) {
+            if (na < nb) return desc ? 1 : -1;
+            if (na > nb) return desc ? -1 : 1;
+            continue;
+          }
+
+          // fallback string compare
+          const sa = String(va || '').localeCompare(String(vb || ''));
+          if (sa !== 0) return desc ? -sa : sa;
+        }
+        return 0;
+      };
+    }
+
+    const comparator = makeComparator(sort);
+    items.sort(comparator);
+
+    // ------- Aggregations & stats -------
+    const total = items.length;
+    const skip = (Math.max(Number(page), 1) - 1) * Math.max(Number(limit), 1);
+    const paged = items.slice(skip, skip + Math.max(Number(limit), 1));
+
+    // counts by status
+    const countsByStatus = items.reduce((acc, it) => {
+      const s = it.status || 'unknown';
+      acc[s] = (acc[s] || 0) + 1;
+      return acc;
+    }, {});
+
+    // counts by faculty (top 10)
+    const countsByFaculty = Object.entries(
+      items.reduce((acc, it) => {
+        const f = String(it.faculty || (it.facultySnapshot?.facultyID) || 'unknown');
+        const name = (it.facultySnapshot?.name) || 'Unknown';
+        if (!acc[f]) acc[f] = { facultyId: f, facultyName: name, count: 0 };
+        acc[f].count++;
+        return acc;
+      }, {})
+    )
+      .map(([, v]) => v)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    // points summary
+    const pointsValues = items.map(it => Number(it.points || 0)).filter(v => !Number.isNaN(v));
+    const sumPoints = pointsValues.reduce((s, v) => s + v, 0);
+    const avgPoints = pointsValues.length ? sumPoints / pointsValues.length : 0;
+    const minPoints = pointsValues.length ? Math.min(...pointsValues) : 0;
+    const maxPoints = pointsValues.length ? Math.max(...pointsValues) : 0;
+
+    // ------- Enrich paged items with related models (title, faculty user, issuedBy user) -------
+    // Note: This performs many small DB calls. Consider batching or adding denormalized snapshots to credits in production.
+    const enriched = await Promise.all(paged.map(async (it) => {
+      const copy = { ...it };
+
+      // If the credit has a reference to creditTitle id store, try to fetch
+      if (it.creditTitle && typeof it.creditTitle === 'string') {
+        try {
+          const ct = await CreditTitle.findById(it.creditTitle);
+          if (ct) copy.creditTitleObj = ct;
+        } catch (e) {
+          // ignore fetch errors
+        }
       }
-      // fallback to localeCompare for strings
-      return desc ? String(vb).localeCompare(String(va)) : String(va).localeCompare(String(vb));
-    });
 
-    // Support legacy page/limit pagination if page is specified (not recommended for large tables)
-    let pagedItems = items;
-    let total = items.length;
-    if (typeof page !== 'undefined') {
-      const p = Math.max(1, Number(page) || 1);
-      const lim = Math.max(1, Number(limit) || 20);
-      const start = (p - 1) * lim;
-      pagedItems = items.slice(start, start + lim);
-      total = items.length;
-    } else {
-      // cursor-based: Dynamo provided limited set already; we return items as-is (limited by opts.limit)
-      pagedItems = items;
-      // total unknown without an extra count scan; we set total to paged length (client can iterate using lastKey to fetch more)
-      total = items.length;
-    }
+      // faculty info: if we have faculty as id and not a snapshot, fetch user
+      if (it.faculty && typeof it.faculty === 'string' && !it.facultySnapshot) {
+        try {
+          const fac = await User.findById(it.faculty);
+          if (fac) copy.facultyObj = fac;
+        } catch (e) {
+          // ignore
+        }
+      }
 
+      // issuedBy
+      if (it.issuedBy && typeof it.issuedBy === 'string' && !it.issuedBySnapshot) {
+        try {
+          const issuer = await User.findById(it.issuedBy);
+          if (issuer) copy.issuedByObj = issuer;
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      // keep both snapshot and fetched objects where available
+      return copy;
+    }));
+
+    const tookMs = Date.now() - startTs;
+
+    // response structure: richer metadata + aggregates + enriched items
     return res.json({
       success: true,
-      total,
-      limit: opts.limit,
-      items: pagedItems,
-      lastKey: lastEvaluatedKey ? Buffer.from(JSON.stringify(lastEvaluatedKey)).toString('base64') : null,
-      // Note: when using page-based pagination, lastKey will likely be null here.
+      meta: {
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(total / Math.max(Number(limit), 1)),
+        returned: enriched.length,
+        tookMs,
+      },
+      filtersApplied: {
+        baseFilter,
+        extraFilters: {
+          status,
+          fromDate,
+          toDate,
+          pointsMin,
+          pointsMax,
+          categories,
+          hasProof,
+          hasAppeal,
+          appealCountMin,
+          appealCountMax,
+          issuedBy,
+          search,
+        },
+        sort,
+      },
+      aggregates: {
+        countsByStatus,
+        countsByFaculty,
+        points: {
+          totalPoints: sumPoints,
+          avgPoints,
+          minPoints,
+          maxPoints,
+        },
+      },
+      items: enriched,
     });
   } catch (err) {
-    return next(err);
+    next(err);
   }
 }
+
 
 
 /**
