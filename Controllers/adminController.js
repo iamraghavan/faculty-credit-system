@@ -1174,6 +1174,74 @@ async function adminUpdateAppealStatus(req, res, next) {
   }
 }
 
+
+/**
+ * OA: Get credits issued by the logged-in OA user
+ * GET /oa/credits/issued
+ * Query params (optional):
+ *  - type   : 'negative' | 'positive' (if omitted returns all types)
+ *  - status : 'pending' | 'approved' | 'rejected' (optional)
+ *  - limit  : number (default 25, max 100)
+ *  - page   : number (default 1)
+ */
+async function oaGetOwnIssuedCredits(req, res, next) {
+  try {
+    // authMiddleware must set req.user
+    const user = req.user;
+    if (!user || !user._id) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    // enforce OA role server-side (defense in depth)
+    if (user.role !== 'oa') {
+      return res.status(403).json({ success: false, message: 'Forbidden: OA role required' });
+    }
+
+    // Build filter: issuedBy must match the OA's id
+    const filter = { issuedBy: user._id };
+
+    // optional filters
+    const { type, status } = req.query;
+    if (type) filter.type = String(type);
+    if (status) filter.status = String(status);
+
+    // pagination
+    const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const offset = (page - 1) * limit;
+
+    // Credit.find currently does a Scan + in-memory filter (see models/Credit.js)
+    const all = await Credit.find(filter); // returns array
+    const total = (all || []).length;
+    const items = (all || []).slice(offset, offset + limit);
+
+    // Optionally attach issuedBySnapshot if not present (cheap enrichment)
+    const itemsWithSnapshot = await Promise.all(items.map(async (c) => {
+      if (c.issuedBySnapshot && c.issuedBySnapshot.name) return c;
+      if (c.issuedBy) {
+        const u = await User.findById(c.issuedBy).catch(() => null);
+        if (u) {
+          // keep existing credit shape, add snapshot
+          return { ...c, issuedBySnapshot: { _id: u._id, name: u.name, email: u.email } };
+        }
+      }
+      return c;
+    }));
+
+    return res.json({
+      success: true,
+      data: {
+        total,
+        page,
+        limit,
+        items: itemsWithSnapshot,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   createCreditTitle,
   listCreditTitles,
@@ -1191,4 +1259,5 @@ module.exports = {
   adminGetAppealByCreditId,
   adminUpdateAppealStatus,
   getNegativeAppeals,
+  oaGetOwnIssuedCredits
 };

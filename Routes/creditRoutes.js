@@ -61,4 +61,5 @@ router.get(
 router.post('/credits/:facultyId/recalc-credits', authMiddleware, recalcCreditsController);
 router.get('/:facultyId/credits', getFacultyCredits);
 
+
 module.exports = router;
