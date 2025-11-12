@@ -1176,53 +1176,258 @@ async function adminUpdateAppealStatus(req, res, next) {
 
 
 /**
- * OA: Get credits issued by the logged-in OA user
+ * OA: Get credits issued by the logged-in OA user (advanced filters)
  * GET /oa/credits/issued
- * Query params (optional):
- *  - type   : 'negative' | 'positive' (if omitted returns all types)
- *  - status : 'pending' | 'approved' | 'rejected' (optional)
- *  - limit  : number (default 25, max 100)
- *  - page   : number (default 1)
+ *
+ * Query params (all optional except page/limit):
+ *  - type             : string or comma list (e.g. negative or negative,positive)
+ *  - status           : string or comma list (e.g. pending,approved)
+ *  - creditTitle      : id or title string (matches credit.creditTitle or credit.creditTitle._id)
+ *  - faculty          : faculty id (credit.faculty) or comma list
+ *  - academicYear     : string or comma list
+ *  - categories       : comma list (matches any category in credit.categories)
+ *  - minPoints        : number
+ *  - maxPoints        : number
+ *  - appealCountMin   : number
+ *  - appealCountMax   : number
+ *  - proofPresent     : boolean (true => proofUrl present)
+ *  - search           : full text search across title, notes, creditTitle.title, facultySnapshot.name
+ *  - createdFrom      : ISO date string
+ *  - createdTo        : ISO date string
+ *  - updatedFrom      : ISO date string
+ *  - updatedTo        : ISO date string
+ *  - sortBy           : createdAt | updatedAt | points | title (default: createdAt)
+ *  - sortOrder        : asc | desc (default: desc)
+ *  - limit            : number (default 25, max 200)
+ *  - page             : number (default 1)
+ *
+ * NOTE: This implementation uses Credit.find(filter) (scan + basic filter) then applies all
+ * additional filtering/sorting in-memory. For large datasets you should add a Dynamo GSI on
+ * issuedBy (and other keys) and use QueryCommand.
  */
 async function oaGetOwnIssuedCredits(req, res, next) {
   try {
-    // authMiddleware must set req.user
     const user = req.user;
     if (!user || !user._id) {
       return res.status(401).json({ success: false, message: 'Unauthorized' });
     }
-
-    // enforce OA role server-side (defense in depth)
+    // enforce OA role
     if (user.role !== 'oa') {
       return res.status(403).json({ success: false, message: 'Forbidden: OA role required' });
     }
 
-    // Build filter: issuedBy must match the OA's id
-    const filter = { issuedBy: user._id };
+    // Helper parsers
+    const parseList = (val) => {
+      if (val === undefined || val === null || val === '') return null;
+      if (Array.isArray(val)) return val;
+      return String(val).split(',').map(s => s.trim()).filter(Boolean);
+    };
+    const parseNumber = (v, fallback = null) => {
+      if (v === undefined || v === null || v === '') return fallback;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : fallback;
+    };
+    const parseDate = (v) => {
+      if (!v) return null;
+      const d = new Date(v);
+      return isNaN(d.getTime()) ? null : d;
+    };
+    const parseBool = (v) => {
+      if (v === undefined || v === null) return null;
+      if (typeof v === 'boolean') return v;
+      const s = String(v).toLowerCase();
+      if (['1','true','yes','y'].includes(s)) return true;
+      if (['0','false','no','n'].includes(s)) return false;
+      return null;
+    };
 
-    // optional filters
-    const { type, status } = req.query;
-    if (type) filter.type = String(type);
-    if (status) filter.status = String(status);
+    // Basic query params
+    const {
+      sortBy = 'createdAt',
+      sortOrder = 'desc',
+    } = req.query;
 
-    // pagination
-    const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
-    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseNumber(req.query.limit, 25), 1), 200);
+    const page = Math.max(parseNumber(req.query.page, 1), 1);
     const offset = (page - 1) * limit;
 
-    // Credit.find currently does a Scan + in-memory filter (see models/Credit.js)
-    const all = await Credit.find(filter); // returns array
-    const total = (all || []).length;
-    const items = (all || []).slice(offset, offset + limit);
+    // Build base filter -> ensure issuedBy only (defense-in-depth). Pass minimal filter to model.find to reduce items returned.
+    // The model.find does strict equality (c[k] === v), so pass issuedBy and maybe simple direct fields if present.
+    const baseFilter = { issuedBy: user._id };
 
-    // Optionally attach issuedBySnapshot if not present (cheap enrichment)
-    const itemsWithSnapshot = await Promise.all(items.map(async (c) => {
+    // Quick pass-through for type/status/academicYear (these go to the DB scan filter)
+    if (req.query.type) baseFilter.type = req.query.type;
+    if (req.query.status) baseFilter.status = req.query.status;
+    if (req.query.academicYear) baseFilter.academicYear = req.query.academicYear;
+
+    // Fetch candidate set (this will scan then apply the simple baseFilter)
+    const candidates = await Credit.find(baseFilter); // returns array
+
+    // If no items, return early
+    if (!candidates || candidates.length === 0) {
+      return res.json({ success: true, data: { total: 0, page, limit, items: [], aggregates: {} } });
+    }
+
+    // Prepare richer filters (in-memory)
+    const types = parseList(req.query.type); // might be null
+    const statuses = parseList(req.query.status);
+    const creditTitleQ = req.query.creditTitle ? String(req.query.creditTitle).trim() : null;
+    const faculties = parseList(req.query.faculty);
+    const academicYears = parseList(req.query.academicYear);
+    const categories = parseList(req.query.categories);
+    const minPoints = parseNumber(req.query.minPoints, null);
+    const maxPoints = parseNumber(req.query.maxPoints, null);
+    const appealCountMin = parseNumber(req.query.appealCountMin, null);
+    const appealCountMax = parseNumber(req.query.appealCountMax, null);
+    const proofPresent = parseBool(req.query.proofPresent);
+    const search = req.query.search ? String(req.query.search).trim().toLowerCase() : null;
+    const createdFrom = parseDate(req.query.createdFrom);
+    const createdTo = parseDate(req.query.createdTo);
+    const updatedFrom = parseDate(req.query.updatedFrom);
+    const updatedTo = parseDate(req.query.updatedTo);
+
+    // Filtering function
+    const matches = (c) => {
+      // type (allow list)
+      if (types && types.length && !types.includes(String(c.type))) return false;
+
+      // status
+      if (statuses && statuses.length && !statuses.includes(String(c.status))) return false;
+
+      // creditTitle - try to match id or string title (case-insensitive)
+      if (creditTitleQ) {
+        const ct = c.creditTitle;
+        const ctId = ct && (ct._id || ct); // could be id or object
+        const ctTitle = (ct && ct.title) ? String(ct.title).toLowerCase() : null;
+        if (ctId && String(ctId) === creditTitleQ) {
+          // ok
+        } else if (ctTitle && ctTitle.includes(creditTitleQ.toLowerCase())) {
+          // ok
+        } else {
+          // not match
+          return false;
+        }
+      }
+
+      // faculty
+      if (faculties && faculties.length) {
+        if (!c.faculty || !faculties.includes(String(c.faculty))) return false;
+      }
+
+      // academicYear
+      if (academicYears && academicYears.length) {
+        if (!c.academicYear || !academicYears.includes(String(c.academicYear))) return false;
+      }
+
+      // categories: require any overlap between requested categories and credit.categories
+      if (categories && categories.length) {
+        const itemCats = Array.isArray(c.categories) ? c.categories.map(String) : [];
+        const hasAny = categories.some(cat => itemCats.includes(cat));
+        if (!hasAny) return false;
+      }
+
+      // points range
+      if (minPoints !== null && (c.points === undefined || Number(c.points) < minPoints)) return false;
+      if (maxPoints !== null && (c.points === undefined || Number(c.points) > maxPoints)) return false;
+
+      // appealCount range
+      if (appealCountMin !== null && (c.appealCount === undefined || Number(c.appealCount) < appealCountMin)) return false;
+      if (appealCountMax !== null && (c.appealCount === undefined || Number(c.appealCount) > appealCountMax)) return false;
+
+      // proof present boolean
+      if (proofPresent !== null) {
+        const hasProof = !!(c.proofUrl || (c.proofMeta && Object.keys(c.proofMeta || {}).length));
+        if (proofPresent !== hasProof) return false;
+      }
+
+      // createdAt/updatedAt range (convert item strings to dates defensively)
+      const createdAt = c.createdAt ? new Date(c.createdAt) : null;
+      if (createdFrom && (!createdAt || createdAt < createdFrom)) return false;
+      if (createdTo && (!createdAt || createdAt > createdTo)) return false;
+
+      const updatedAt = c.updatedAt ? new Date(c.updatedAt) : null;
+      if (updatedFrom && (!updatedAt || updatedAt < updatedFrom)) return false;
+      if (updatedTo && (!updatedAt || updatedAt > updatedTo)) return false;
+
+      // search: title, notes, creditTitle.title, facultySnapshot.name, issuedBySnapshot.name
+      if (search) {
+        const hay = [
+          c.title,
+          c.notes,
+          (c.creditTitle && c.creditTitle.title) ? c.creditTitle.title : null,
+          (c.facultySnapshot && c.facultySnapshot.name) ? c.facultySnapshot.name : null,
+          (c.issuedBySnapshot && c.issuedBySnapshot.name) ? c.issuedBySnapshot.name : null,
+        ]
+          .filter(Boolean)
+          .map(s => String(s).toLowerCase())
+          .join(' | ');
+        if (!hay.includes(search.toLowerCase())) return false;
+      }
+
+      return true;
+    };
+
+    // Apply filters
+    const filtered = candidates.filter(matches);
+
+    // Aggregates (simple counts by type and status) - helpful for frontend faceted UI
+    const aggregates = {
+      total: filtered.length,
+      byType: {},
+      byStatus: {},
+    };
+    for (const it of filtered) {
+      const t = it.type || 'unknown';
+      const s = it.status || 'unknown';
+      aggregates.byType[t] = (aggregates.byType[t] || 0) + 1;
+      aggregates.byStatus[s] = (aggregates.byStatus[s] || 0) + 1;
+    }
+
+    // Sorting
+    const compare = (a, b) => {
+      let av, bv;
+      switch (sortBy) {
+        case 'updatedAt':
+          av = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+          bv = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+          break;
+        case 'points':
+          av = Number(a.points || 0);
+          bv = Number(b.points || 0);
+          break;
+        case 'title':
+          av = a.title ? String(a.title).toLowerCase() : '';
+          bv = b.title ? String(b.title).toLowerCase() : '';
+          break;
+        case 'createdAt':
+        default:
+          av = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          bv = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      }
+
+      if (av < bv) return sortOrder === 'asc' ? -1 : 1;
+      if (av > bv) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    };
+
+    const sorted = filtered.sort(compare);
+
+    // Pagination slice
+    const pagedItems = sorted.slice(offset, offset + limit);
+
+    // Optionally: ensure issuedBySnapshot present (cheap enrichment)
+    const itemsWithSnapshot = await Promise.all(pagedItems.map(async (c) => {
       if (c.issuedBySnapshot && c.issuedBySnapshot.name) return c;
       if (c.issuedBy) {
-        const u = await User.findById(c.issuedBy).catch(() => null);
-        if (u) {
-          // keep existing credit shape, add snapshot
-          return { ...c, issuedBySnapshot: { _id: u._id, name: u.name, email: u.email } };
+        // Avoid throwing if User.findById fails; model.findById uses Dynamo's GetCommand
+        try {
+          const u = await User.findById(c.issuedBy);
+          if (u) {
+            return { ...c, issuedBySnapshot: { _id: u._id, name: u.name, email: u.email } };
+          }
+        } catch (e) {
+          // ignore enrichment errors
+          return c;
         }
       }
       return c;
@@ -1231,10 +1436,12 @@ async function oaGetOwnIssuedCredits(req, res, next) {
     return res.json({
       success: true,
       data: {
-        total,
+        totalFiltered: aggregates.total,
+        totalAvailable: candidates.length, // how many candidates fetched from scan+baseFilter
         page,
         limit,
         items: itemsWithSnapshot,
+        aggregates, // byType and byStatus
       },
     });
   } catch (err) {
