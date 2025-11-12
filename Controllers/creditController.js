@@ -499,12 +499,23 @@ async function recalcCreditsController(req, res, next) {
 }
 
 /**
- * GET faculty credits summary / stats (optimized)
+ * GET faculty credits summary / stats (optimized + time-series aggregations)
+ *
+ * Query params (optional):
+ *  - recalc=true|false
+ *  - period=daily|weekly|monthly|quarterly|yearly|academicYear   (default: monthly)
+ *  - startDate=YYYY-MM-DD    (inclusive)
+ *  - endDate=YYYY-MM-DD      (inclusive)
+ *  - tz=Asia/Kolkata         (IANA timezone string; default Asia/Kolkata for IST)
  */
 async function getFacultyCredits(req, res, next) {
   try {
     const { facultyId } = req.params;
     const { recalc } = req.query;
+    const period = (req.query.period || 'monthly').toLowerCase();
+    const startDateRaw = req.query.startDate || null;
+    const endDateRaw = req.query.endDate || null;
+    const tz = req.query.tz || 'Asia/Kolkata'; // default to IST for display/grouping
 
     if (!facultyId) {
       return res.status(400).json({
@@ -559,101 +570,213 @@ async function getFacultyCredits(req, res, next) {
       credits = await Credit.find({ faculty: String(userId) });
     }
 
-    // If no credits short-circuit
-    if (!credits || credits.length === 0) {
-      const emptyStats = {
-        totalCreditsCount: 0,
-        totalPositiveCount: 0,
-        totalNegativeCount: 0,
-        appliedPositiveCount: 0,
-        appliedNegativeCount: 0,
-        totalPositivePoints: 0,
-        totalNegativePoints: 0,
-        appliedPositiveCountByYear: {},
-        appliedNegativeCountByYear: {},
-        positiveCountByYear: {},
-        negativeCountByYear: {},
-        creditsCountByYear: {},
-        eventsApplied: 0,
-        currentAcademicYear: null,
-        currentYearStats: null,
-      };
-
-      return res.json({
-        success: true,
-        data: {
-          name: user.name,
-          facultyID: user.facultyID,
-          currentCredit: user.currentCredit || 0,
-          creditsByYear: user.creditsByYear || {},
-          stats: emptyStats,
-        },
-      });
+    // ---------- quick helpers ----------
+    const EXCLUDE_STATUS = new Set(['pending', 'deleted']);
+    const parseDateSafe = (s) => {
+      if (!s) return null;
+      const d = new Date(s);
+      return isNaN(d.getTime()) ? null : d;
+    };
+    const startDate = startDateRaw ? parseDateSafe(startDateRaw) : null;
+    const endDate = endDateRaw ? parseDateSafe(endDateRaw) : null;
+    // normalize endDate to end of day if provided
+    if (endDate) {
+      endDate.setHours(23, 59, 59, 999);
     }
 
-    // Helper: decide if a negative credit should be counted as applied
+    // timezone-aware local date extraction helper using Intl
+    function toLocalDateParts(date, tzArg) {
+      // returns { year, month (1-12), day, weekday } in the timezone
+      const str = date.toLocaleString('en-US', { timeZone: tzArg, hour12: false });
+      // str like "11/12/2025, 2:27:12"
+      // parse via Date with tz by splitting components using toLocaleString against timezone
+      const [datePart, timePart] = str.split(',').map(s => s.trim());
+      const [m, d, y] = datePart.split('/').map(Number);
+      // month m, day d, year y
+      const weekday = new Date(date.toLocaleString('en-US', { timeZone: tzArg, weekday: 'short' })).toLocaleString();
+      return { year: y, month: m, day: d, weekday };
+    }
+
+    // ISO week number (Gregorian) helper (based on UTC date)
+    function getISOWeekKey(date, tzArg) {
+      // compute ISO week using local time in tzArg by constructing a Date at the local midnight
+      // we'll use UTC calculations on a date that represents the same instant — acceptable for grouping
+      const d = new Date(date.getTime());
+      // Set to Thursday in current week: ISO week date rule
+      const day = (d.getUTCDay() + 6) % 7; // Mon=0..Sun=6
+      d.setUTCDate(d.getUTCDate() - day + 3);
+      const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+      const weekNo = 1 + Math.round(((d - firstThursday) / 86400000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7);
+      const year = d.getUTCFullYear();
+      return `${year}-W${String(weekNo).padStart(2, '0')}`;
+    }
+
+    // Determine academicYear label (prefer existing credit.academicYear if present)
+    function getAcademicYearFromCredit(c) {
+      if (c.academicYear) return c.academicYear;
+      // fallback: infer from createdAt using July as start of academic year (common)
+      const dt = c.createdAt ? new Date(c.createdAt) : new Date();
+      const y = dt.getFullYear();
+      const m = dt.getMonth() + 1; // 1..12
+      // academic year starts July (7) — adjust if you want June or August
+      if (m >= 7) return `${y}-${y + 1}`;
+      return `${y - 1}-${y}`;
+    }
+
+    // Create a period key string (for grouping) for a date
+    function getPeriodKey(date, periodType) {
+      if (!date) return 'unknown';
+      const d = new Date(date);
+      switch (periodType) {
+        case 'daily': {
+          // YYYY-MM-DD in tz by shifting to locale-based toISOString-like string
+          const parts = d.toLocaleString('en-CA', { timeZone: tz }).split(',')[0]; // en-CA gives yyyy-mm-dd
+          return parts; // "YYYY-MM-DD"
+        }
+        case 'weekly': {
+          // Use ISO week key based on UTC week calc (stable)
+          return getISOWeekKey(d, tz);
+        }
+        case 'monthly': {
+          const parts = d.toLocaleString('en-CA', { timeZone: tz }).split(',')[0]; // YYYY-MM-DD
+          return parts.slice(0, 7); // "YYYY-MM"
+        }
+        case 'quarterly': {
+          // Q1 = Jan-Mar, Q2 = Apr-Jun, Q3 = Jul-Sep, Q4 = Oct-Dec
+          const parts = d.toLocaleString('en-CA', { timeZone: tz }).split(',')[0];
+          const [yStr, ,] = parts.split('-');
+          const month = d.toLocaleString('en-US', { timeZone: tz }).split('/')[0]; // mm
+          const mNum = Number(month);
+          const q = Math.floor((mNum - 1) / 3) + 1;
+          return `${yStr}-Q${q}`;
+        }
+        case 'yearly': {
+          const y = d.toLocaleString('en-US', { timeZone: tz }).split('/')[2]; // yyyy
+          return String(y);
+        }
+        case 'academicyear':
+        case 'academicYear':
+          return getAcademicYearFromCredit({ createdAt: d.toISOString() });
+        default: {
+          // default to monthly
+          const parts2 = d.toLocaleString('en-CA', { timeZone: tz }).split(',')[0];
+          return parts2.slice(0, 7);
+        }
+      }
+    }
+
+    // ---------- AGGREGATE: single-pass ----------
+    // totals and per-period maps
+    let totalPositiveCount = 0;
+    let totalNegativeCount = 0;
+    let totalPositivePoints = 0;
+    let totalNegativePoints = 0;
+
+    const creditsCountByYear = Object.create(null);
+    const positiveCountByYear = Object.create(null);
+    const negativeCountByYear = Object.create(null);
+    const positivePointsByYear = Object.create(null);
+    const negativePointsByYear = Object.create(null);
+
+    // period maps: { periodKey: { positivePoints, negativePoints, positiveCount, negativeCount, net } }
+    const periodMap = Object.create(null);
+    const yearsSeen = new Set();
+
     function negativeShouldApply(credit) {
-      if (!credit.appeal) return credit.status === 'approved';
+      if (!credit.appeal) return String(credit.status) === 'approved';
       const raw = credit.appeal.status;
       const status = raw === undefined || raw === null ? '' : String(raw).trim().toLowerCase();
       if (status === 'rejected') return true;
       return false;
     }
 
-    // Exclude these statuses entirely from calculations
-    const EXCLUDE_STATUS = new Set(['pending', 'deleted']);
+    for (let i = 0; i < credits.length; i++) {
+      const c = credits[i];
+      if (!c) continue;
 
-    // Accumulators
-    const positiveCountByYear = Object.create(null);
-    const negativeCountByYear = Object.create(null);
-    const appliedPositiveCountByYear = Object.create(null);
-    const appliedNegativeCountByYear = Object.create(null);
-    const creditsCountByYear = Object.create(null);
-    const yearsSeen = new Set();
+      // status filtering - skip pending/deleted (also skip if appeal.status is pending/deleted)
+      const st = (c.status || '').toString().trim().toLowerCase();
+      if (EXCLUDE_STATUS.has(st)) continue;
+      const appealSt = c.appeal && c.appeal.status ? String(c.appeal.status).trim().toLowerCase() : '';
+      if (appealSt && EXCLUDE_STATUS.has(appealSt)) continue;
 
-    let totalPositiveCount = 0;
-    let totalNegativeCount = 0;
-    let appliedPositiveCount = 0;
-    let appliedNegativeCount = 0;
-    let totalPositivePoints = 0;
-    let totalNegativePoints = 0;
+      // respect startDate/endDate filtering based on createdAt (or updatedAt if you prefer)
+      const createdAt = c.createdAt ? new Date(c.createdAt) : null;
+      if (!createdAt) continue; // skip items with no date
+      if (startDate && createdAt < startDate) continue;
+      if (endDate && createdAt > endDate) continue;
 
-    // Single-pass reduction
-    for (const c of credits) {
-      const status = (c.status || '').toString().trim().toLowerCase();
-      // skip pending or deleted entries entirely
-      if (EXCLUDE_STATUS.has(status)) continue;
-
-      const year = c.academicYear || 'unknown';
+      const year = c.academicYear || getAcademicYearFromCredit(c);
       yearsSeen.add(year);
-
       creditsCountByYear[year] = (creditsCountByYear[year] || 0) + 1;
 
-      // points may be string/number/undefined; coerce to number safely
+      // points coercion
       const pts = Number(c.points ?? 0) || 0;
 
-      if (c.type === 'positive') {
-        totalPositiveCount++;
-        positiveCountByYear[year] = (positiveCountByYear[year] || 0) + 1;
-        totalPositivePoints += pts;
-        if (String(c.status) === 'approved') {
-          appliedPositiveCount++;
-          appliedPositiveCountByYear[year] = (appliedPositiveCountByYear[year] || 0) + 1;
-        }
-      } else if (c.type === 'negative') {
-        totalNegativeCount++;
-        negativeCountByYear[year] = (negativeCountByYear[year] || 0) + 1;
-        totalNegativePoints += pts;
-        if (negativeShouldApply(c)) {
-          appliedNegativeCount++;
-          appliedNegativeCountByYear[year] = (appliedNegativeCountByYear[year] || 0) + 1;
-        }
-      } else {
-        // unknown type - still counted in creditsCountByYear but not in positive/negative sums
+      // period key (for requested period) - for academicYear grouping we use c.academicYear
+      const periodKey = period === 'academicyear' || period === 'academicyear' ? (c.academicYear || year) : getPeriodKey(createdAt, period);
+
+      if (!periodMap[periodKey]) {
+        periodMap[periodKey] = {
+          positivePoints: 0,
+          negativePoints: 0,
+          positiveCount: 0,
+          negativeCount: 0,
+          net: 0,
+        };
       }
+
+      if (String(c.type) === 'positive') {
+        // only count positives that are approved (pending/deleted already excluded)
+        if (String(c.status).toLowerCase() === 'approved') {
+          totalPositiveCount++;
+          totalPositivePoints += pts;
+          positiveCountByYear[year] = (positiveCountByYear[year] || 0) + 1;
+          positivePointsByYear[year] = (positivePointsByYear[year] || 0) + pts;
+
+          periodMap[periodKey].positivePoints += pts;
+          periodMap[periodKey].positiveCount += 1;
+          periodMap[periodKey].net += pts;
+        }
+      } else if (String(c.type) === 'negative') {
+        totalNegativeCount++;
+        // accumulate negative points always as sum; whether it actually applies (deduction) is decided by negativeShouldApply for applied counts
+        // For "sum of negatives" user asked, we treat negative sum as absolute of points in negative credits (excluding pending/deleted)
+        const negPts = Math.abs(pts);
+        totalNegativePoints += negPts;
+        negativeCountByYear[year] = (negativeCountByYear[year] || 0) + 1;
+        negativePointsByYear[year] = (negativePointsByYear[year] || 0) + negPts;
+
+        periodMap[periodKey].negativePoints += negPts;
+        periodMap[periodKey].negativeCount += 1;
+        periodMap[periodKey].net -= negPts;
+      } else {
+        // unknown type: still counted in creditsCountByYear but not in totals
+      }
+    } // end credits loop
+
+    // build sorted series from periodMap
+    const periodKeys = Object.keys(periodMap).sort((a, b) => {
+      // try lexicographic sort which works for ISO-like keys (YYYY-MM, YYYY-MM-DD, YYYY-Www, YYYY-Qn)
+      return a.localeCompare(b);
+    });
+
+    const series = periodKeys.map((k) => ({
+      period: k,
+      positivePoints: periodMap[k].positivePoints,
+      negativePoints: periodMap[k].negativePoints,
+      net: periodMap[k].net,
+      positiveCount: periodMap[k].positiveCount,
+      negativeCount: periodMap[k].negativeCount,
+    }));
+
+    // If no explicit start/end provided and period=monthly, optionally return last 12 months series
+    let trimmedSeries = series;
+    if (!startDate && !endDate && period === 'monthly' && series.length > 12) {
+      trimmedSeries = series.slice(-12);
     }
 
-    // current academic year logic (prefer constructed current year if present in dataset)
+    // current academic year logic (prefer constructed current year if present)
     const now = new Date();
     const y = now.getFullYear();
     const constructedAcademicYear = `${y}-${y + 1}`;
@@ -672,32 +795,29 @@ async function getFacultyCredits(req, res, next) {
         totalCredits: creditsCountByYear[currentAcademicYear] || 0,
         totalPositive: positiveCountByYear[currentAcademicYear] || 0,
         totalNegative: negativeCountByYear[currentAcademicYear] || 0,
-        appliedPositive: appliedPositiveCountByYear[currentAcademicYear] || 0,
-        appliedNegative: appliedNegativeCountByYear[currentAcademicYear] || 0,
+        positivePoints: positivePointsByYear[currentAcademicYear] || 0,
+        negativePoints: negativePointsByYear[currentAcademicYear] || 0,
         netForYear:
-          (appliedPositiveCountByYear[currentAcademicYear] || 0) -
-          (appliedNegativeCountByYear[currentAcademicYear] || 0),
+          (positivePointsByYear[currentAcademicYear] || 0) -
+          (negativePointsByYear[currentAcademicYear] || 0),
       };
     }
-
-    const eventsApplied = appliedPositiveCount + appliedNegativeCount;
 
     const stats = {
       totalCreditsCount: Object.values(creditsCountByYear).reduce((a, b) => a + b, 0),
       totalPositiveCount,
       totalNegativeCount,
-      appliedPositiveCount,
-      appliedNegativeCount,
       totalPositivePoints,
       totalNegativePoints,
-      appliedPositiveCountByYear,
-      appliedNegativeCountByYear,
+      creditsCountByYear,
       positiveCountByYear,
       negativeCountByYear,
-      creditsCountByYear,
-      eventsApplied,
+      positivePointsByYear,
+      negativePointsByYear,
       currentAcademicYear,
       currentYearStats,
+      series: trimmedSeries,         // time-series for requested period (array ordered by key)
+      fullSeriesCount: series.length // how many unique periods available
     };
 
     return res.json({
@@ -714,6 +834,7 @@ async function getFacultyCredits(req, res, next) {
     next(err);
   }
 }
+
 
 module.exports = {
   submitPositiveCredit,
