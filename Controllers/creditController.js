@@ -499,7 +499,7 @@ async function recalcCreditsController(req, res, next) {
 }
 
 /**
- * GET faculty credits summary / stats
+ * GET faculty credits summary / stats (optimized)
  */
 async function getFacultyCredits(req, res, next) {
   try {
@@ -513,29 +513,26 @@ async function getFacultyCredits(req, res, next) {
       });
     }
 
-    // ---------- FIND USER (Mongo or Dynamo) ----------
+    // ---------- FIND USER ----------
     let user = null;
-
-    // MongoDB ObjectId check
     const isObjectId = /^[0-9a-fA-F]{24}$/.test(facultyId);
 
     if (isObjectId && User.findById) {
       try {
         const maybeUser = await User.findById(facultyId);
         if (maybeUser) user = maybeUser;
-      } catch (_) {}
+      } catch (e) {
+        // ignore
+      }
     }
 
-    // Try lookup by facultyID (works for Dynamo or Mongo)
     if (!user && User.find) {
       const results = await User.find({ facultyID: facultyId });
       if (results && results.length > 0) user = results[0];
     }
 
     if (!user) {
-      return res
-        .status(404)
-        .json({ success: false, message: 'Faculty not found' });
+      return res.status(404).json({ success: false, message: 'Faculty not found' });
     }
 
     const userId = user._id;
@@ -547,8 +544,7 @@ async function getFacultyCredits(req, res, next) {
       } catch (err) {
         console.error('Recalc failed:', err);
       }
-
-      // re-fetch user from Dynamo or Mongo
+      // refresh user
       if (User.findById) {
         user = await User.findById(userId);
       } else {
@@ -563,74 +559,110 @@ async function getFacultyCredits(req, res, next) {
       credits = await Credit.find({ faculty: String(userId) });
     }
 
-    // ---------- PROCESS CREDITS ----------
+    // If no credits short-circuit
+    if (!credits || credits.length === 0) {
+      const emptyStats = {
+        totalCreditsCount: 0,
+        totalPositiveCount: 0,
+        totalNegativeCount: 0,
+        appliedPositiveCount: 0,
+        appliedNegativeCount: 0,
+        totalPositivePoints: 0,
+        totalNegativePoints: 0,
+        appliedPositiveCountByYear: {},
+        appliedNegativeCountByYear: {},
+        positiveCountByYear: {},
+        negativeCountByYear: {},
+        creditsCountByYear: {},
+        eventsApplied: 0,
+        currentAcademicYear: null,
+        currentYearStats: null,
+      };
+
+      return res.json({
+        success: true,
+        data: {
+          name: user.name,
+          facultyID: user.facultyID,
+          currentCredit: user.currentCredit || 0,
+          creditsByYear: user.creditsByYear || {},
+          stats: emptyStats,
+        },
+      });
+    }
+
+    // Helper: decide if a negative credit should be counted as applied
     function negativeShouldApply(credit) {
       if (!credit.appeal) return credit.status === 'approved';
       const raw = credit.appeal.status;
-      const status =
-        raw === undefined || raw === null
-          ? ''
-          : String(raw).trim().toLowerCase();
-      const emptyLike =
-        status === '' || status === 'none' || status === 'null' || status === 'nil';
+      const status = raw === undefined || raw === null ? '' : String(raw).trim().toLowerCase();
       if (status === 'rejected') return true;
       return false;
     }
 
-    const positiveCountByYear = {};
-    const negativeCountByYear = {};
-    const appliedPositiveCountByYear = {};
-    const appliedNegativeCountByYear = {};
-    const creditsCountByYear = {};
+    // Exclude these statuses entirely from calculations
+    const EXCLUDE_STATUS = new Set(['pending', 'deleted']);
+
+    // Accumulators
+    const positiveCountByYear = Object.create(null);
+    const negativeCountByYear = Object.create(null);
+    const appliedPositiveCountByYear = Object.create(null);
+    const appliedNegativeCountByYear = Object.create(null);
+    const creditsCountByYear = Object.create(null);
+    const yearsSeen = new Set();
 
     let totalPositiveCount = 0;
     let totalNegativeCount = 0;
     let appliedPositiveCount = 0;
     let appliedNegativeCount = 0;
-    const yearsSeen = new Set();
+    let totalPositivePoints = 0;
+    let totalNegativePoints = 0;
 
+    // Single-pass reduction
     for (const c of credits) {
+      const status = (c.status || '').toString().trim().toLowerCase();
+      // skip pending or deleted entries entirely
+      if (EXCLUDE_STATUS.has(status)) continue;
+
       const year = c.academicYear || 'unknown';
       yearsSeen.add(year);
 
-      positiveCountByYear[year] ||= 0;
-      negativeCountByYear[year] ||= 0;
-      appliedPositiveCountByYear[year] ||= 0;
-      appliedNegativeCountByYear[year] ||= 0;
-      creditsCountByYear[year] ||= 0;
-      creditsCountByYear[year] += 1;
+      creditsCountByYear[year] = (creditsCountByYear[year] || 0) + 1;
+
+      // points may be string/number/undefined; coerce to number safely
+      const pts = Number(c.points ?? 0) || 0;
 
       if (c.type === 'positive') {
         totalPositiveCount++;
-        positiveCountByYear[year]++;
-        if (c.status === 'approved') {
+        positiveCountByYear[year] = (positiveCountByYear[year] || 0) + 1;
+        totalPositivePoints += pts;
+        if (String(c.status) === 'approved') {
           appliedPositiveCount++;
-          appliedPositiveCountByYear[year]++;
+          appliedPositiveCountByYear[year] = (appliedPositiveCountByYear[year] || 0) + 1;
         }
       } else if (c.type === 'negative') {
         totalNegativeCount++;
-        negativeCountByYear[year]++;
+        negativeCountByYear[year] = (negativeCountByYear[year] || 0) + 1;
+        totalNegativePoints += pts;
         if (negativeShouldApply(c)) {
           appliedNegativeCount++;
-          appliedNegativeCountByYear[year]++;
+          appliedNegativeCountByYear[year] = (appliedNegativeCountByYear[year] || 0) + 1;
         }
+      } else {
+        // unknown type - still counted in creditsCountByYear but not in positive/negative sums
       }
     }
 
-    // ---------- DETERMINE CURRENT ACADEMIC YEAR ----------
+    // current academic year logic (prefer constructed current year if present in dataset)
     const now = new Date();
     const y = now.getFullYear();
     const constructedAcademicYear = `${y}-${y + 1}`;
     let currentAcademicYear = constructedAcademicYear;
 
     if (!yearsSeen.has(constructedAcademicYear)) {
-      const yearsArray = Array.from(yearsSeen);
-      if (yearsArray.length === 0) {
-        currentAcademicYear = null;
-      } else {
-        yearsArray.sort();
-        currentAcademicYear = yearsArray[yearsArray.length - 1];
-      }
+      const yearsArray = Array.from(yearsSeen).filter(Boolean).sort();
+      if (yearsArray.length === 0) currentAcademicYear = null;
+      else currentAcademicYear = yearsArray[yearsArray.length - 1];
     }
 
     let currentYearStats = null;
@@ -651,11 +683,13 @@ async function getFacultyCredits(req, res, next) {
     const eventsApplied = appliedPositiveCount + appliedNegativeCount;
 
     const stats = {
-      totalCreditsCount: credits.length,
+      totalCreditsCount: Object.values(creditsCountByYear).reduce((a, b) => a + b, 0),
       totalPositiveCount,
       totalNegativeCount,
       appliedPositiveCount,
       appliedNegativeCount,
+      totalPositivePoints,
+      totalNegativePoints,
       appliedPositiveCountByYear,
       appliedNegativeCountByYear,
       positiveCountByYear,
@@ -666,8 +700,7 @@ async function getFacultyCredits(req, res, next) {
       currentYearStats,
     };
 
-    // ---------- BUILD RESPONSE ----------
-    const response = {
+    return res.json({
       success: true,
       data: {
         name: user.name,
@@ -676,9 +709,7 @@ async function getFacultyCredits(req, res, next) {
         creditsByYear: user.creditsByYear || {},
         stats,
       },
-    };
-
-    return res.json(response);
+    });
   } catch (err) {
     next(err);
   }

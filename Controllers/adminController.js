@@ -1456,29 +1456,24 @@ let createEmailQueue = null;
 try {
   createEmailQueue = require('../utils/emailQueue').createEmailQueue;
 } catch (e) {
-  // not present — we'll call sendEmail directly
   createEmailQueue = null;
+}
+
+function formatIST(dateInput) {
+  if (!dateInput) return '';
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return String(dateInput);
+  // en-IN gives a readable dd/mm/yyyy format; timeZone Asia/Kolkata for IST/Chennai
+  return new Intl.DateTimeFormat('en-IN', {
+    dateStyle: 'short',
+    timeStyle: 'medium',
+    timeZone: 'Asia/Kolkata',
+  }).format(d);
 }
 
 /**
  * OA: Delete a credit that the OA issued (supports soft-delete)
  * DELETE /oa/credits/issued/:id
- *
- * Query params:
- *  - soft=true|false      -> if true, perform soft-delete (update credit.status='deleted', add deletedBy/deletedAt)
- *  - waitForEmail=true|false -> if true, wait for email send/enqueue result before returning
- *
- * Response data:
- *  {
- *    deleted: boolean,
- *    deleteMode: 'hard'|'soft',
- *    deletedBy: string,            // OA name or id
- *    deletedAt: ISOString,
- *    emailQueued: boolean,
- *    emailSent: boolean,
- *    recipientEmail?: string,
- *    emailError?: string|null
- *  }
  */
 async function oaDeleteIssuedCredit(req, res, next) {
   try {
@@ -1527,13 +1522,33 @@ async function oaDeleteIssuedCredit(req, res, next) {
       }
     }
 
+    // RESOLVE CREDIT TITLE (if credit.creditTitle is an id, try to load title)
+    let creditTitle = '';
+    try {
+      if (credit.creditTitle) {
+        if (typeof credit.creditTitle === 'string' || typeof credit.creditTitle === 'number') {
+          // credit.creditTitle might be an id string — try to fetch
+          const ct = await CreditTitle.findById(String(credit.creditTitle)).catch(() => null);
+          creditTitle = (ct && (ct.title || String(ct._id))) || String(credit.creditTitle);
+        } else if (typeof credit.creditTitle === 'object') {
+          creditTitle = credit.creditTitle.title || String(credit.creditTitle._id || JSON.stringify(credit.creditTitle));
+        } else {
+          creditTitle = String(credit.creditTitle);
+        }
+      } else {
+        creditTitle = credit.title || '';
+      }
+    } catch (e) {
+      // fallback safely
+      creditTitle = credit.title || String(credit.creditTitle || '');
+    }
+
     const oaName = user.name || String(user._id) || 'OA user';
     const deletedAt = new Date().toISOString();
     const deleteMode = softDelete ? 'soft' : 'hard';
 
     // perform delete (soft or hard)
     if (softDelete) {
-      // Add deletion metadata; keep original item otherwise
       const updatePayload = { status: 'deleted', deletedBy: user._id, deletedAt };
       try {
         await Credit.update(id, updatePayload);
@@ -1542,7 +1557,6 @@ async function oaDeleteIssuedCredit(req, res, next) {
         return res.status(500).json({ success: false, message: 'Failed to soft-delete credit' });
       }
     } else {
-      // Hard delete
       try {
         await Credit.delete(id);
       } catch (e) {
@@ -1563,7 +1577,6 @@ async function oaDeleteIssuedCredit(req, res, next) {
       emailError: null,
     };
 
-    // If we have no recipient email, return early (deletion already done)
     if (!recipientEmail) {
       return res.json({ success: true, data: result });
     }
@@ -1577,14 +1590,14 @@ async function oaDeleteIssuedCredit(req, res, next) {
     try {
       emailTemplateHtml = await fs.readFile(templatePath, 'utf8');
     } catch (err) {
-      // not fatal — we'll use fallback HTML
       emailTemplateHtml = null;
       console.info(`OA delete email template not found at ${templatePath}. Using fallback template.`);
     }
 
-    // Prepare replacements
-    const createdAtHuman = credit.createdAt ? new Date(credit.createdAt).toLocaleString() : 'an earlier date';
-    const creditTitle = (credit.creditTitle && (credit.creditTitle.title || credit.creditTitle)) || credit.title || '';
+    // Format times in IST
+    const createdAtIST = formatIST(credit.createdAt) || 'an earlier date';
+    const deletedAtIST = formatIST(deletedAt);
+
     const points = credit.points ?? 'N/A';
 
     // Compose HTML + plain-text
@@ -1592,28 +1605,25 @@ async function oaDeleteIssuedCredit(req, res, next) {
     let text = null;
 
     if (emailTemplateHtml) {
-      // Basic token replacement: {{name}}, {{oaName}}, {{createdAt}}, {{title}}, {{points}}, {{deletedAt}}
       html = emailTemplateHtml
         .replace(/{{\s*name\s*}}/gi, recipientName || '')
         .replace(/{{\s*oaName\s*}}/gi, oaName)
-        .replace(/{{\s*createdAt\s*}}/gi, createdAtHuman)
+        .replace(/{{\s*createdAt\s*}}/gi, createdAtIST)
         .replace(/{{\s*title\s*}}/gi, creditTitle)
         .replace(/{{\s*points\s*}}/gi, String(points))
-        .replace(/{{\s*deletedAt\s*}}/gi, new Date(deletedAt).toLocaleString());
+        .replace(/{{\s*deletedAt\s*}}/gi, deletedAtIST);
 
-      text = `Hello ${recipientName || 'Faculty member'},\n\nA credit record (title: "${creditTitle}", points: ${points}) that was issued to you on ${createdAtHuman} has been removed by ${oaName} on ${new Date(deletedAt).toLocaleString()}.\n\nIf you have questions, please contact your administration.\n\nRegards,\nFaculty Credit System\n${oaName}`;
+      text = `Hello ${recipientName || 'Faculty member'},\n\nA credit record (title: "${creditTitle}", points: ${points}) that was issued to you on ${createdAtIST} has been removed by ${oaName} on ${deletedAtIST}.\n\nIf you have questions, please contact your administration.\n\nRegards,\nFaculty Credit System\n${oaName}`;
     } else {
-      // Inline fallback
       html = `<p>Hello ${recipientName || 'Faculty member'},</p>
-<p>A credit record issued to you on <strong>${createdAtHuman}</strong> (title: "<em>${creditTitle}</em>", points: <strong>${points}</strong>) has been <strong>removed</strong> by <strong>${oaName}</strong> on ${new Date(deletedAt).toLocaleString()}.</p>
-<p><strong>Deleted by:</strong> ${oaName}<br/><strong>Deleted at:</strong> ${new Date(deletedAt).toLocaleString()}</p>
+<p>A credit record issued to you on <strong>${createdAtIST}</strong> (title: "<em>${creditTitle}</em>", points: <strong>${points}</strong>) has been <strong>removed</strong> by <strong>${oaName}</strong> on ${deletedAtIST}.</p>
+<p><strong>Deleted by:</strong> ${oaName}<br/><strong>Deleted at:</strong> ${deletedAtIST}</p>
 <p>If you believe this was issued in error or have questions, please contact your administration.</p>
 <p>Regards,<br/>Faculty Credit System<br/><strong>${oaName}</strong></p>`;
 
-      text = `Hello ${recipientName || 'Faculty member'},\n\nA credit record issued to you on ${createdAtHuman} (title: "${creditTitle}", points: ${points}) has been removed by ${oaName} on ${new Date(deletedAt).toLocaleString()}.\n\nDeleted by: ${oaName}\nDeleted at: ${new Date(deletedAt).toLocaleString()}\n\nIf you have questions, please contact your administration.\n\nRegards,\nFaculty Credit System\n${oaName}`;
+      text = `Hello ${recipientName || 'Faculty member'},\n\nA credit record issued to you on ${createdAtIST} (title: "${creditTitle}", points: ${points}) has been removed by ${oaName} on ${deletedAtIST}.\n\nDeleted by: ${oaName}\nDeleted at: ${deletedAtIST}\n\nIf you have questions, please contact your administration.\n\nRegards,\nFaculty Credit System\n${oaName}`;
     }
 
-    // Build mail options
     const mailOptions = {
       to: recipientEmail,
       subject: process.env.OA_DELETE_EMAIL_SUBJECT || 'Correction: Credit record removed',
@@ -1624,15 +1634,12 @@ async function oaDeleteIssuedCredit(req, res, next) {
     // Send via queue if available, otherwise direct sendEmail
     const sendViaQueue = !!createEmailQueue;
     if (sendViaQueue) {
-      // create a queue instance with sensible defaults or environment overrides
       const queue = createEmailQueue({
         concurrency: Number(process.env.OA_EMAIL_CONCURRENCY) || 2,
         maxRetries: Number(process.env.OA_EMAIL_RETRIES) || 2,
       });
 
       result.emailQueued = true;
-
-      // enqueue and optionally wait for the result
       const enqueuePromise = queue.enqueue({ mailOptions });
 
       if (waitForEmail) {
@@ -1650,13 +1657,11 @@ async function oaDeleteIssuedCredit(req, res, next) {
           console.error('Failed while waiting for queued email result', { err: qErr && qErr.message });
         }
       } else {
-        // fire-and-forget: let queue handle retries; we already set emailQueued=true
         enqueuePromise.catch((err) => {
           console.error('Queued email failed asynchronously', { to: recipientEmail, err: err && err.message });
         });
       }
     } else {
-      // direct sendEmail path; may block but we respect waitForEmail flag (if false, we still try to send but don't wait)
       if (waitForEmail) {
         try {
           await sendEmail(mailOptions);
@@ -1667,9 +1672,8 @@ async function oaDeleteIssuedCredit(req, res, next) {
           console.error('Failed to send deletion email', { to: recipientEmail, err: sendErr && sendErr.message });
         }
       } else {
-        // not waiting — trigger but don't await (still handle errors to avoid unhandled rejection)
         sendEmail(mailOptions)
-          .then(() => { /* nothing to do */ })
+          .then(() => { /* nothing */ })
           .catch((err) => console.error('Async sendEmail failed', { to: recipientEmail, err: err && err.message }));
       }
     }
@@ -1679,6 +1683,7 @@ async function oaDeleteIssuedCredit(req, res, next) {
     next(err);
   }
 }
+
 
 module.exports = {
   createCreditTitle,
