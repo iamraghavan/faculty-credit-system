@@ -19,7 +19,8 @@ const {
   adminGetAppealByCreditId,
   adminUpdateAppealStatus,
   getNegativeAppeals,
-  oaGetOwnIssuedCredits
+  oaGetOwnIssuedCredits,
+  oaDeleteIssuedCredit,
 } = require('../Controllers/adminController');
 
 const { authMiddleware, adminOnly, adminOrOA } = require('../Middleware/authMiddleware');
@@ -89,5 +90,8 @@ router.get('/credits/negative/appeals', authMiddleware, adminOnly, adminListNega
 
 // OA-only endpoint: get credits issued by the logged-in OA
 router.get('/oa/credits/issued', authMiddleware, adminOrOA, oaGetOwnIssuedCredits);
+
+router.delete('/oa/credits/issued/:id', authMiddleware, adminOrOA, oaDeleteIssuedCredit);
+
 
 module.exports = router;

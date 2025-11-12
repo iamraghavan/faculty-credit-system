@@ -10,6 +10,7 @@ const path = require('path');
 const { recalcFacultyCredits } = require('../utils/calculateCredits');
 const { uploadFileToGitHub , uploadFileToGitHubBuffer} = require('../utils/githubUpload');
 const { connectDB } = require('../config/db');
+const { sendEmail } = require('../utils/email');
 
 /**
  * Ensure DynamoDB client is connected
@@ -1449,6 +1450,236 @@ async function oaGetOwnIssuedCredits(req, res, next) {
   }
 }
 
+
+// Optional email queue helper (bulkRegister used createEmailQueue). We attempt to require it but degrade gracefully.
+let createEmailQueue = null;
+try {
+  createEmailQueue = require('../utils/emailQueue').createEmailQueue;
+} catch (e) {
+  // not present — we'll call sendEmail directly
+  createEmailQueue = null;
+}
+
+/**
+ * OA: Delete a credit that the OA issued (supports soft-delete)
+ * DELETE /oa/credits/issued/:id
+ *
+ * Query params:
+ *  - soft=true|false      -> if true, perform soft-delete (update credit.status='deleted', add deletedBy/deletedAt)
+ *  - waitForEmail=true|false -> if true, wait for email send/enqueue result before returning
+ *
+ * Response data:
+ *  {
+ *    deleted: boolean,
+ *    deleteMode: 'hard'|'soft',
+ *    deletedBy: string,            // OA name or id
+ *    deletedAt: ISOString,
+ *    emailQueued: boolean,
+ *    emailSent: boolean,
+ *    recipientEmail?: string,
+ *    emailError?: string|null
+ *  }
+ */
+async function oaDeleteIssuedCredit(req, res, next) {
+  try {
+    const user = req.user;
+    const { id } = req.params;
+    const softDelete = String(req.query.soft || 'false').toLowerCase() === 'true';
+    const waitForEmail = String(req.query.waitForEmail || 'false').toLowerCase() === 'true';
+
+    if (!user || !user._id) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+    if (user.role !== 'oa') {
+      return res.status(403).json({ success: false, message: 'Forbidden: OA role required' });
+    }
+    if (!id) {
+      return res.status(400).json({ success: false, message: 'Missing credit id' });
+    }
+
+    // fetch credit
+    const credit = await Credit.findById(id);
+    if (!credit) {
+      return res.status(404).json({ success: false, message: 'Credit not found' });
+    }
+
+    // ensure OA issued this credit
+    const issuedBy = credit.issuedBy || credit.issuedById || null;
+    if (!issuedBy || String(issuedBy) !== String(user._id)) {
+      return res.status(403).json({ success: false, message: 'Forbidden: you can only delete credits you issued' });
+    }
+
+    // prepare recipient info (snapshot first)
+    let recipientEmail = null;
+    let recipientName = null;
+    if (credit.facultySnapshot && credit.facultySnapshot.email) {
+      recipientEmail = credit.facultySnapshot.email;
+      recipientName = credit.facultySnapshot.name || null;
+    } else if (credit.faculty) {
+      try {
+        const facultyUser = await User.findById(credit.faculty);
+        if (facultyUser && facultyUser.email) {
+          recipientEmail = facultyUser.email;
+          recipientName = facultyUser.name || null;
+        }
+      } catch (e) {
+        console.warn('Failed to lookup faculty for email', { facultyId: credit.faculty, err: e && e.message });
+      }
+    }
+
+    const oaName = user.name || String(user._id) || 'OA user';
+    const deletedAt = new Date().toISOString();
+    const deleteMode = softDelete ? 'soft' : 'hard';
+
+    // perform delete (soft or hard)
+    if (softDelete) {
+      // Add deletion metadata; keep original item otherwise
+      const updatePayload = { status: 'deleted', deletedBy: user._id, deletedAt };
+      try {
+        await Credit.update(id, updatePayload);
+      } catch (e) {
+        console.error('Soft-delete failed', { creditId: id, err: e && e.message });
+        return res.status(500).json({ success: false, message: 'Failed to soft-delete credit' });
+      }
+    } else {
+      // Hard delete
+      try {
+        await Credit.delete(id);
+      } catch (e) {
+        console.error('Hard delete failed', { creditId: id, err: e && e.message });
+        return res.status(500).json({ success: false, message: 'Failed to delete credit' });
+      }
+    }
+
+    // Prepare response metadata
+    const result = {
+      deleted: true,
+      deleteMode,
+      deletedBy: oaName,
+      deletedAt,
+      emailQueued: false,
+      emailSent: false,
+      recipientEmail: recipientEmail || null,
+      emailError: null,
+    };
+
+    // If we have no recipient email, return early (deletion already done)
+    if (!recipientEmail) {
+      return res.json({ success: true, data: result });
+    }
+
+    // Resolve template path (optional)
+    const templatePath = process.env.OA_DELETE_EMAIL_TEMPLATE
+      ? path.resolve(process.env.OA_DELETE_EMAIL_TEMPLATE)
+      : path.resolve(process.cwd(), 'email-templates', 'oa-credit-deleted.html');
+
+    let emailTemplateHtml = null;
+    try {
+      emailTemplateHtml = await fs.readFile(templatePath, 'utf8');
+    } catch (err) {
+      // not fatal — we'll use fallback HTML
+      emailTemplateHtml = null;
+      console.info(`OA delete email template not found at ${templatePath}. Using fallback template.`);
+    }
+
+    // Prepare replacements
+    const createdAtHuman = credit.createdAt ? new Date(credit.createdAt).toLocaleString() : 'an earlier date';
+    const creditTitle = (credit.creditTitle && (credit.creditTitle.title || credit.creditTitle)) || credit.title || '';
+    const points = credit.points ?? 'N/A';
+
+    // Compose HTML + plain-text
+    let html = null;
+    let text = null;
+
+    if (emailTemplateHtml) {
+      // Basic token replacement: {{name}}, {{oaName}}, {{createdAt}}, {{title}}, {{points}}, {{deletedAt}}
+      html = emailTemplateHtml
+        .replace(/{{\s*name\s*}}/gi, recipientName || '')
+        .replace(/{{\s*oaName\s*}}/gi, oaName)
+        .replace(/{{\s*createdAt\s*}}/gi, createdAtHuman)
+        .replace(/{{\s*title\s*}}/gi, creditTitle)
+        .replace(/{{\s*points\s*}}/gi, String(points))
+        .replace(/{{\s*deletedAt\s*}}/gi, new Date(deletedAt).toLocaleString());
+
+      text = `Hello ${recipientName || 'Faculty member'},\n\nA credit record (title: "${creditTitle}", points: ${points}) that was issued to you on ${createdAtHuman} has been removed by ${oaName} on ${new Date(deletedAt).toLocaleString()}.\n\nIf you have questions, please contact your administration.\n\nRegards,\nFaculty Credit System\n${oaName}`;
+    } else {
+      // Inline fallback
+      html = `<p>Hello ${recipientName || 'Faculty member'},</p>
+<p>A credit record issued to you on <strong>${createdAtHuman}</strong> (title: "<em>${creditTitle}</em>", points: <strong>${points}</strong>) has been <strong>removed</strong> by <strong>${oaName}</strong> on ${new Date(deletedAt).toLocaleString()}.</p>
+<p><strong>Deleted by:</strong> ${oaName}<br/><strong>Deleted at:</strong> ${new Date(deletedAt).toLocaleString()}</p>
+<p>If you believe this was issued in error or have questions, please contact your administration.</p>
+<p>Regards,<br/>Faculty Credit System<br/><strong>${oaName}</strong></p>`;
+
+      text = `Hello ${recipientName || 'Faculty member'},\n\nA credit record issued to you on ${createdAtHuman} (title: "${creditTitle}", points: ${points}) has been removed by ${oaName} on ${new Date(deletedAt).toLocaleString()}.\n\nDeleted by: ${oaName}\nDeleted at: ${new Date(deletedAt).toLocaleString()}\n\nIf you have questions, please contact your administration.\n\nRegards,\nFaculty Credit System\n${oaName}`;
+    }
+
+    // Build mail options
+    const mailOptions = {
+      to: recipientEmail,
+      subject: process.env.OA_DELETE_EMAIL_SUBJECT || 'Correction: Credit record removed',
+      text,
+      html,
+    };
+
+    // Send via queue if available, otherwise direct sendEmail
+    const sendViaQueue = !!createEmailQueue;
+    if (sendViaQueue) {
+      // create a queue instance with sensible defaults or environment overrides
+      const queue = createEmailQueue({
+        concurrency: Number(process.env.OA_EMAIL_CONCURRENCY) || 2,
+        maxRetries: Number(process.env.OA_EMAIL_RETRIES) || 2,
+      });
+
+      result.emailQueued = true;
+
+      // enqueue and optionally wait for the result
+      const enqueuePromise = queue.enqueue({ mailOptions });
+
+      if (waitForEmail) {
+        try {
+          const qRes = await enqueuePromise;
+          if (qRes && qRes.success) {
+            result.emailSent = true;
+          } else {
+            result.emailSent = false;
+            result.emailError = qRes && (qRes.error || `Failed after ${qRes.attempts || 'N'} attempts`);
+          }
+        } catch (qErr) {
+          result.emailSent = false;
+          result.emailError = qErr && (qErr.message || String(qErr));
+          console.error('Failed while waiting for queued email result', { err: qErr && qErr.message });
+        }
+      } else {
+        // fire-and-forget: let queue handle retries; we already set emailQueued=true
+        enqueuePromise.catch((err) => {
+          console.error('Queued email failed asynchronously', { to: recipientEmail, err: err && err.message });
+        });
+      }
+    } else {
+      // direct sendEmail path; may block but we respect waitForEmail flag (if false, we still try to send but don't wait)
+      if (waitForEmail) {
+        try {
+          await sendEmail(mailOptions);
+          result.emailSent = true;
+        } catch (sendErr) {
+          result.emailSent = false;
+          result.emailError = sendErr && (sendErr.message || String(sendErr));
+          console.error('Failed to send deletion email', { to: recipientEmail, err: sendErr && sendErr.message });
+        }
+      } else {
+        // not waiting — trigger but don't await (still handle errors to avoid unhandled rejection)
+        sendEmail(mailOptions)
+          .then(() => { /* nothing to do */ })
+          .catch((err) => console.error('Async sendEmail failed', { to: recipientEmail, err: err && err.message }));
+      }
+    }
+
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   createCreditTitle,
   listCreditTitles,
@@ -1466,5 +1697,6 @@ module.exports = {
   adminGetAppealByCreditId,
   adminUpdateAppealStatus,
   getNegativeAppeals,
-  oaGetOwnIssuedCredits
+  oaGetOwnIssuedCredits,
+  oaDeleteIssuedCredit
 };
