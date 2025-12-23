@@ -1,11 +1,18 @@
 // routes/authRoutes.js
 const express = require('express');
 const router = express.Router();
-const { register, login, refreshToken, bulkRegister, forgotPassword, resetPassword,   enableAppMfa,
-  verifyAppMfaSetup,
-  toggleEmailMfa,
-  disableAllMfa,
-  verifyMfa, getProfile, changePassword  } = require('../Controllers/authController');
+const { 
+  refreshToken, 
+  // keeping others that weren't moved yet
+  verifyMfa, getProfile, changePassword,
+  toggleEmailMfa, disableAllMfa // assuming MfaController only took a few
+} = require('../Controllers/authController');
+
+const { register, login } = require('../Controllers/Auth/AuthenticationController');
+const { bulkRegister } = require('../Controllers/Auth/BulkImportController');
+const { forgotPassword, resetPassword } = require('../Controllers/Auth/PasswordController');
+const { enableAppMfa, verifyAppMfaSetup } = require('../Controllers/Auth/MfaController');
+
 const { authMiddleware,  adminOnly} = require('../Middleware/authMiddleware');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });

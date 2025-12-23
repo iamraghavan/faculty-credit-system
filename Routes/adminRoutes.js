@@ -3,15 +3,8 @@ const router = express.Router();
 const multer = require('multer');
 
 const {
-  createCreditTitle,
-  listCreditTitles,
-  updateCreditTitle,
-  deleteCreditTitle,
-  listPositiveCreditsForAdmin,
   updatePositiveCreditStatus,
   getPositiveCreditById,
-  issueNegativeCredit,
-  listNegativeCreditsForFaculty,
   adminListNegativeCredits,
   adminGetNegativeCreditById,
   adminGetFacultyByNegativeCreditId,
@@ -21,7 +14,25 @@ const {
   getNegativeAppeals,
   oaGetOwnIssuedCredits,
   oaDeleteIssuedCredit,
+  listNegativeCreditsForFaculty
 } = require('../Controllers/adminController');
+
+const {
+  createCreditTitle,
+  listCreditTitles,
+  updateCreditTitle,
+  deleteCreditTitle
+} = require('../Controllers/Admin/CreditTitleController');
+
+const {
+  listPositiveCreditsForAdmin,
+  // listNegativeCreditsForFaculty // moved here if refactored fully, else keep legacy
+} = require('../Controllers/Admin/CreditListController');
+
+const {
+  issueNegativeCredit
+} = require('../Controllers/Admin/CreditManageController');
+
 
 const { authMiddleware, adminOnly, adminOrOA } = require('../Middleware/authMiddleware');
 
