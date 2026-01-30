@@ -62,6 +62,12 @@ app.use('/api/v1/conversations', conversationRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/analytics', analyticsRouter);
 
+// Serve Scholarship Booklet PDF
+app.get('/api/v1/scholarship-booklet', (req, res) => {
+  const pdfPath = require('path').join(__dirname, 'EGSPGOI-Scholarship-information-booklet_v1.pdf');
+  res.sendFile(pdfPath);
+});
+
 
 // Error handling middleware
 app.use(errorHandler);
