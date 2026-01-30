@@ -31,7 +31,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Security & sanitization
 app.use(helmet());
 app.use(cors());
-app.use(mongoSanitize());
+// app.use(mongoSanitize());
 
 // Logging
 if (process.env.NODE_ENV !== 'production') {
@@ -60,7 +60,7 @@ app.use('/api/v1/credits', creditRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/conversations', conversationRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
-app.use('/api/v1/analytics',analyticsRouter);
+app.use('/api/v1/analytics', analyticsRouter);
 
 
 // Error handling middleware
