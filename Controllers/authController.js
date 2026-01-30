@@ -106,7 +106,11 @@ async function register(req, res, next) {
  */
 async function login(req, res, next) {
   try {
-    const { email, password, mfaToken, turnstileToken } = req.body;
+    const { email, password, mfaToken, token, turnstileToken } = req.body;
+
+    // Support both mfaToken and token (if 6-digit) for backwards compatibility
+    const actualMfaToken = mfaToken || (token && String(token).length === 6 ? token : null);
+
     if (!email || !password)
       return res.status(400).json({ success: false, message: 'Missing credentials' });
 
@@ -123,7 +127,7 @@ async function login(req, res, next) {
 
     // 🔸 If MFA is NOT enabled — issue token directly
     if (!user.mfaEnabled) {
-      const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
+      const jwtToken = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
         expiresIn: process.env.JWT_EXPIRES_IN || '1h',
       });
 
@@ -139,18 +143,18 @@ async function login(req, res, next) {
           department: freshUser.department,
           currentCredit: freshUser.currentCredit,
           creditsByYear: freshUser.creditsByYear,
-          token,
+          token: jwtToken,
         },
       });
     }
 
-    // 🔸 If App-based MFA is enabled AND a 6-digit mfaToken is provided
-    if (mfaToken && String(mfaToken).length === 6 && user.mfaAppEnabled) {
-      const valid = verifyTotpToken(user.mfaSecret, mfaToken);
+    // 🔸 If App-based MFA is enabled AND a 6-digit actualMfaToken is provided
+    if (actualMfaToken && String(actualMfaToken).length === 6 && user.mfaAppEnabled) {
+      const valid = verifyTotpToken(user.mfaSecret, actualMfaToken);
       if (!valid)
         return res.status(400).json({ success: false, message: 'Invalid MFA code' });
 
-      const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
+      const jwtToken = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
         expiresIn: process.env.JWT_EXPIRES_IN || '1h',
       });
 
@@ -167,60 +171,85 @@ async function login(req, res, next) {
           department: freshUser.department,
           currentCredit: freshUser.currentCredit,
           creditsByYear: freshUser.creditsByYear,
-          token,
+          token: jwtToken,
         },
       });
     }
+    const valid = verifyTotpToken(user.mfaSecret, mfaToken);
+    if (!valid)
+      return res.status(400).json({ success: false, message: 'Invalid MFA code' });
+
+    const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
+      expiresIn: process.env.JWT_EXPIRES_IN || '1h',
+    });
+
+    return res.json({
+      success: true,
+      mfaRequired: false,
+      message: 'MFA verified (App)',
+      data: {
+        id: freshUser._id,
+        name: freshUser.name,
+        facultyID: freshUser.facultyID,
+        apiKey: freshUser.apiKey,
+        role: freshUser.role,
+        department: freshUser.department,
+        currentCredit: freshUser.currentCredit,
+        creditsByYear: freshUser.creditsByYear,
+        token,
+      },
+    });
+  }
 
     // 🔸 If Email-based MFA enabled (send code)
     if (user.mfaEmailEnabled) {
-      const code = generateMfaCode();
-      const expires = Date.now() + 5 * 60 * 1000;
-      await User.update(user._id, { mfaCode: code, mfaCodeExpires: expires });
-      await sendMfaEmail(user, code);
+    const code = generateMfaCode();
+    const expires = Date.now() + 5 * 60 * 1000;
+    await User.update(user._id, { mfaCode: code, mfaCodeExpires: expires });
+    await sendMfaEmail(user, code);
 
-      return res.json({
-        success: true,
-        mfaRequired: true,
-        mfaType: 'email',
-        userId: user._id,
-        message: 'Email MFA code sent. Please verify with /verify-mfa endpoint.',
-        data: {
-          id: freshUser._id,
-          name: freshUser.name,
-          facultyID: freshUser.facultyID,
-          apiKey: freshUser.apiKey,
-          role: freshUser.role,
-          department: freshUser.department,
-          currentCredit: freshUser.currentCredit,
-          creditsByYear: freshUser.creditsByYear,
-        },
-      });
-    }
-
-    // 🔸 If only App-based MFA is on but no 6-digit mfaToken sent yet
-    if (user.mfaAppEnabled && (!mfaToken || String(mfaToken).length !== 6)) {
-      return res.json({
-        success: true,
-        mfaRequired: true,
-        mfaType: 'app',
-        message: 'App-based MFA required. Please provide code from your authenticator app.',
-        data: {
-          id: freshUser._id,
-          name: freshUser.name,
-          facultyID: freshUser.facultyID,
-          apiKey: freshUser.apiKey,
-          role: freshUser.role,
-          department: freshUser.department,
-          currentCredit: freshUser.currentCredit,
-          creditsByYear: freshUser.creditsByYear,
-        },
-      });
-    }
-
-  } catch (err) {
-    next(err);
+    return res.json({
+      success: true,
+      mfaRequired: true,
+      mfaType: 'email',
+      userId: user._id,
+      message: 'Email MFA code sent. Please verify with /verify-mfa endpoint.',
+      data: {
+        id: freshUser._id,
+        name: freshUser.name,
+        facultyID: freshUser.facultyID,
+        apiKey: freshUser.apiKey,
+        role: freshUser.role,
+        department: freshUser.department,
+        currentCredit: freshUser.currentCredit,
+        creditsByYear: freshUser.creditsByYear,
+      },
+    });
   }
+
+  // 🔸 If only App-based MFA is on but no 6-digit mfaToken sent yet
+  if (user.mfaAppEnabled && (!mfaToken || String(mfaToken).length !== 6)) {
+    return res.json({
+      success: true,
+      mfaRequired: true,
+      mfaType: 'app',
+      message: 'App-based MFA required. Please provide code from your authenticator app.',
+      data: {
+        id: freshUser._id,
+        name: freshUser.name,
+        facultyID: freshUser.facultyID,
+        apiKey: freshUser.apiKey,
+        role: freshUser.role,
+        department: freshUser.department,
+        currentCredit: freshUser.currentCredit,
+        creditsByYear: freshUser.creditsByYear,
+      },
+    });
+  }
+
+} catch (err) {
+  next(err);
+}
 }
 
 
