@@ -1,8 +1,8 @@
 // routes/authRoutes.js
 const express = require('express');
 const router = express.Router();
-const { 
-  refreshToken, 
+const {
+  refreshToken,
   // keeping others that weren't moved yet
   verifyMfa, getProfile, changePassword,
   toggleEmailMfa, disableAllMfa // assuming MfaController only took a few
@@ -13,7 +13,7 @@ const { bulkRegister } = require('../Controllers/Auth/BulkImportController');
 const { forgotPassword, resetPassword } = require('../Controllers/Auth/PasswordController');
 const { enableAppMfa, verifyAppMfaSetup } = require('../Controllers/Auth/MfaController');
 
-const { authMiddleware,  adminOnly} = require('../Middleware/authMiddleware');
+const { authMiddleware, adminOnly } = require('../Middleware/authMiddleware');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -37,5 +37,5 @@ router.post('/verify-mfa', verifyMfa);
 router.post('/change-password', authMiddleware, changePassword);
 
 router.get('/profile', authMiddleware, getProfile);
-
+// 02
 module.exports = router;
