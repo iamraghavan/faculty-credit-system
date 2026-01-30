@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const fs = require('fs').promises;
 const path = require('path');
 
-const { generateTotpSecret, generateTotpQrCode, verifyTotpToken, generateMfaCode, sendMfaEmail  } = require('../utils/mfa');
+const { generateTotpSecret, generateTotpQrCode, verifyTotpToken, generateMfaCode, sendMfaEmail } = require('../utils/mfa');
 /**
  * Register a new user (DynamoDB version)
  */
@@ -106,7 +106,7 @@ async function register(req, res, next) {
  */
 async function login(req, res, next) {
   try {
-    const { email, password, token: mfaToken } = req.body;
+    const { email, password, mfaToken, turnstileToken } = req.body;
     if (!email || !password)
       return res.status(400).json({ success: false, message: 'Missing credentials' });
 
@@ -144,8 +144,8 @@ async function login(req, res, next) {
       });
     }
 
-    // 🔸 If App-based MFA is enabled and token provided
-    if (mfaToken && user.mfaAppEnabled) {
+    // 🔸 If App-based MFA is enabled AND a 6-digit mfaToken is provided
+    if (mfaToken && String(mfaToken).length === 6 && user.mfaAppEnabled) {
       const valid = verifyTotpToken(user.mfaSecret, mfaToken);
       if (!valid)
         return res.status(400).json({ success: false, message: 'Invalid MFA code' });
@@ -198,8 +198,8 @@ async function login(req, res, next) {
       });
     }
 
-    // 🔸 If only App-based MFA is on but no token sent yet
-    if (user.mfaAppEnabled && !mfaToken) {
+    // 🔸 If only App-based MFA is on but no 6-digit mfaToken sent yet
+    if (user.mfaAppEnabled && (!mfaToken || String(mfaToken).length !== 6)) {
       return res.json({
         success: true,
         mfaRequired: true,
@@ -573,9 +573,9 @@ async function forgotPassword(req, res, next) {
     const resetUrl = `${process.env.FRONTEND_URL || 'https://fcs.egspgroup.in/u/portal/auth'}/reset-password/${resetToken}`;
 
     const mailOptions = {
-  to: user.email,
-  subject: 'Password Reset - CreditWise - EGSPGOI',
-  text: `Hello ${user.name},
+      to: user.email,
+      subject: 'Password Reset - CreditWise - EGSPGOI',
+      text: `Hello ${user.name},
 
 We received a request to reset your password for the CreditWise.
 
@@ -586,7 +586,7 @@ This link will expire in 10 minutes.
 
 If you did not request a password reset, please ignore this email or contact your system administrator.`,
 
-  html: `
+      html: `
   <div style="font-family: Arial, sans-serif; background-color: #f5f7fa; padding: 40px 0;">
     <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
       <div style="background: #0c3c78; color: #ffffff; padding: 20px 30px; text-align: center;">
@@ -629,7 +629,7 @@ If you did not request a password reset, please ignore this email or contact you
     </div>
   </div>
   `,
-};
+    };
 
 
     await sendEmail(mailOptions);
@@ -802,9 +802,13 @@ async function disableAllMfa(req, res, next) {
 }
 async function verifyMfa(req, res, next) {
   try {
-    const { userId: bodyUserId, code: bodyCode, token } = req.body;
-    const code = bodyCode || token; // accept either
-    const userId = String(bodyUserId || req.user._id || req.user.id);
+    const { userId: bodyUserId, code: bodyCode, token: bodyToken } = req.body;
+    const code = bodyCode || bodyToken; // accept either
+    const userId = bodyUserId || (req.user ? (req.user._id || req.user.id) : null);
+
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'User ID is required for verification' });
+    }
 
     if (!code) {
       return res.status(400).json({ success: false, message: 'MFA code is required' });
@@ -835,6 +839,7 @@ async function verifyMfa(req, res, next) {
 }
 async function getProfile(req, res, next) {
   try {
+    if (!req.user) return res.status(401).json({ success: false, message: 'Unauthorized' });
     // Get the user ID from the auth middleware
     const userId = String(req.user._id || req.user.id);
 
@@ -898,6 +903,7 @@ async function getProfile(req, res, next) {
  */
 async function changePassword(req, res, next) {
   try {
+    if (!req.user) return res.status(401).json({ success: false, message: 'Unauthorized' });
     const { currentPassword, newPassword, confirmPassword } = req.body;
     const userId = String(req.user._id || req.user.id);
 
@@ -937,4 +943,4 @@ async function changePassword(req, res, next) {
 
 
 
-module.exports = { register, login,getProfile, changePassword, refreshToken, bulkRegister,  forgotPassword, resetPassword,verifyMfa, enableAppMfa, verifyAppMfaSetup, toggleEmailMfa,disableAllMfa,  };
+module.exports = { register, login, getProfile, changePassword, refreshToken, bulkRegister, forgotPassword, resetPassword, verifyMfa, enableAppMfa, verifyAppMfaSetup, toggleEmailMfa, disableAllMfa, };

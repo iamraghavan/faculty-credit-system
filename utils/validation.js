@@ -44,8 +44,9 @@ const schemas = {
     login: Joi.object({
       email: Joi.string().email().required(),
       password: Joi.string().required(),
-      token: Joi.string().optional(), // MFA token
-      turnstileToken: Joi.string().optional() // Cloudflare Turnstile token
+      mfaToken: Joi.string().optional(), // Specific for MFA
+      token: Joi.string().optional(),    // Legacy/Generic
+      turnstileToken: Joi.string().optional() // Cloudflare Turnstile
     })
   }
 };
