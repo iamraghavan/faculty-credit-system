@@ -14,7 +14,7 @@ async function forgotPassword(req, res, next) {
     if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
 
     const users = await User.find({ email: email.toLowerCase() });
-    
+
     // Security: Always return "email sent" (success) even if user not found to prevent enumeration
     if (users.length > 0) {
       const user = users[0];
@@ -48,7 +48,7 @@ async function forgotPassword(req, res, next) {
       await sendEmail({
         to: user.email,
         subject: 'Reset your password - CreditHub',
-        html, 
+        html,
         text: `Reset your password here: ${resetUrl}`
       });
     }
@@ -77,9 +77,9 @@ async function resetPassword(req, res, next) {
     // Note: Since User.find() performs a Scan, this is inefficient but acceptable for MVP.
     // In production, use GSI on resetPasswordToken.
     const allUsers = await User.find();
-    const user = allUsers.find(u => 
-      u.resetPasswordToken === hashedToken && 
-      u.resetPasswordExpires && 
+    const user = allUsers.find(u =>
+      u.resetPasswordToken === hashedToken &&
+      u.resetPasswordExpires &&
       Date.now() < Number(u.resetPasswordExpires)
     );
 
@@ -102,9 +102,9 @@ async function resetPassword(req, res, next) {
     const templatePath = path.join(process.cwd(), 'email-templates', 'reset-success.html');
     let html;
     try {
-        html = fs.readFileSync(templatePath, 'utf8');
-    } catch(e) {
-        html = `<p>Your password has been changed successfully.</p>`;
+      html = fs.readFileSync(templatePath, 'utf8');
+    } catch (e) {
+      html = `<p>Your password has been changed successfully.</p>`;
     }
 
     const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`;
@@ -127,3 +127,4 @@ async function resetPassword(req, res, next) {
   }
 }
 
+module.exports = { forgotPassword, resetPassword };
