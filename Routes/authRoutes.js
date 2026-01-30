@@ -37,5 +37,10 @@ router.post('/verify-mfa', verifyMfa);
 router.post('/change-password', authMiddleware, changePassword);
 
 router.get('/profile', authMiddleware, getProfile);
-// 02
+
+// Session Management
+router.get('/sessions', authMiddleware, listSessions);
+router.delete('/sessions/others', authMiddleware, revokeAllOtherSessions);
+router.delete('/sessions/:id', authMiddleware, revokeSession);
+
 module.exports = router;

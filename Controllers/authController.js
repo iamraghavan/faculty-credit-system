@@ -14,6 +14,7 @@ const fs = require('fs').promises;
 const path = require('path');
 
 const { generateTotpSecret, generateTotpQrCode, verifyTotpToken, generateMfaCode, sendMfaEmail } = require('../utils/mfa');
+const Session = require('../Models/Session');
 /**
  * Register a new user (DynamoDB version)
  */
@@ -127,7 +128,15 @@ async function login(req, res, next) {
 
     // 🔸 If MFA is NOT enabled — issue token directly
     if (!user.mfaEnabled) {
-      const jwtToken = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
+      // Create Session
+      const session = await Session.create({
+        userId: user._id,
+        device: req.headers['user-agent'] || 'Unknown',
+        lastIp: req.ip || req.headers['x-forwarded-for'] || 'unknown',
+        userAgent: req.headers['user-agent'] || '',
+      });
+
+      const jwtToken = jwt.sign({ id: user._id, role: user.role, sessionId: session._id }, process.env.JWT_SECRET, {
         expiresIn: process.env.JWT_EXPIRES_IN || '1h',
       });
 
@@ -144,6 +153,7 @@ async function login(req, res, next) {
           currentCredit: freshUser.currentCredit,
           creditsByYear: freshUser.creditsByYear,
           token: jwtToken,
+          sessionId: session._id,
         },
       });
     }
@@ -154,7 +164,15 @@ async function login(req, res, next) {
       if (!valid)
         return res.status(400).json({ success: false, message: 'Invalid MFA code' });
 
-      const jwtToken = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
+      // Create Session
+      const session = await Session.create({
+        userId: user._id,
+        device: req.headers['user-agent'] || 'Unknown',
+        lastIp: req.ip || req.headers['x-forwarded-for'] || 'unknown',
+        userAgent: req.headers['user-agent'] || '',
+      });
+
+      const jwtToken = jwt.sign({ id: user._id, role: user.role, sessionId: session._id }, process.env.JWT_SECRET, {
         expiresIn: process.env.JWT_EXPIRES_IN || '1h',
       });
 
@@ -172,84 +190,60 @@ async function login(req, res, next) {
           currentCredit: freshUser.currentCredit,
           creditsByYear: freshUser.creditsByYear,
           token: jwtToken,
+          sessionId: session._id,
         },
       });
     }
-    const valid = verifyTotpToken(user.mfaSecret, mfaToken);
-    if (!valid)
-      return res.status(400).json({ success: false, message: 'Invalid MFA code' });
-
-    const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
-      expiresIn: process.env.JWT_EXPIRES_IN || '1h',
-    });
-
-    return res.json({
-      success: true,
-      mfaRequired: false,
-      message: 'MFA verified (App)',
-      data: {
-        id: freshUser._id,
-        name: freshUser.name,
-        facultyID: freshUser.facultyID,
-        apiKey: freshUser.apiKey,
-        role: freshUser.role,
-        department: freshUser.department,
-        currentCredit: freshUser.currentCredit,
-        creditsByYear: freshUser.creditsByYear,
-        token,
-      },
-    });
-  }
 
     // 🔸 If Email-based MFA enabled (send code)
     if (user.mfaEmailEnabled) {
-    const code = generateMfaCode();
-    const expires = Date.now() + 5 * 60 * 1000;
-    await User.update(user._id, { mfaCode: code, mfaCodeExpires: expires });
-    await sendMfaEmail(user, code);
+      const code = generateMfaCode();
+      const expires = Date.now() + 5 * 60 * 1000;
+      await User.update(user._id, { mfaCode: code, mfaCodeExpires: expires });
+      await sendMfaEmail(user, code);
 
-    return res.json({
-      success: true,
-      mfaRequired: true,
-      mfaType: 'email',
-      userId: user._id,
-      message: 'Email MFA code sent. Please verify with /verify-mfa endpoint.',
-      data: {
-        id: freshUser._id,
-        name: freshUser.name,
-        facultyID: freshUser.facultyID,
-        apiKey: freshUser.apiKey,
-        role: freshUser.role,
-        department: freshUser.department,
-        currentCredit: freshUser.currentCredit,
-        creditsByYear: freshUser.creditsByYear,
-      },
-    });
+      return res.json({
+        success: true,
+        mfaRequired: true,
+        mfaType: 'email',
+        userId: user._id,
+        message: 'Email MFA code sent. Please verify with /verify-mfa endpoint.',
+        data: {
+          id: freshUser._id,
+          name: freshUser.name,
+          facultyID: freshUser.facultyID,
+          apiKey: freshUser.apiKey,
+          role: freshUser.role,
+          department: freshUser.department,
+          currentCredit: freshUser.currentCredit,
+          creditsByYear: freshUser.creditsByYear,
+        },
+      });
+    }
+
+    // 🔸 If only App-based MFA is on but no 6-digit actualMfaToken sent yet
+    if (user.mfaAppEnabled && (!actualMfaToken || String(actualMfaToken).length !== 6)) {
+      return res.json({
+        success: true,
+        mfaRequired: true,
+        mfaType: 'app',
+        message: 'App-based MFA required. Please provide code from your authenticator app.',
+        data: {
+          id: freshUser._id,
+          name: freshUser.name,
+          facultyID: freshUser.facultyID,
+          apiKey: freshUser.apiKey,
+          role: freshUser.role,
+          department: freshUser.department,
+          currentCredit: freshUser.currentCredit,
+          creditsByYear: freshUser.creditsByYear,
+        },
+      });
+    }
+
+  } catch (err) {
+    next(err);
   }
-
-  // 🔸 If only App-based MFA is on but no 6-digit mfaToken sent yet
-  if (user.mfaAppEnabled && (!mfaToken || String(mfaToken).length !== 6)) {
-    return res.json({
-      success: true,
-      mfaRequired: true,
-      mfaType: 'app',
-      message: 'App-based MFA required. Please provide code from your authenticator app.',
-      data: {
-        id: freshUser._id,
-        name: freshUser.name,
-        facultyID: freshUser.facultyID,
-        apiKey: freshUser.apiKey,
-        role: freshUser.role,
-        department: freshUser.department,
-        currentCredit: freshUser.currentCredit,
-        creditsByYear: freshUser.creditsByYear,
-      },
-    });
-  }
-
-} catch (err) {
-  next(err);
-}
 }
 
 
@@ -855,13 +849,21 @@ async function verifyMfa(req, res, next) {
 
     await User.update(user._id, { mfaCode: null, mfaCodeExpires: null });
 
+    // Create Session
+    const session = await Session.create({
+      userId: user._id,
+      device: req.headers['user-agent'] || 'Unknown',
+      lastIp: req.ip || req.headers['x-forwarded-for'] || 'unknown',
+      userAgent: req.headers['user-agent'] || '',
+    });
+
     const tokenJwt = jwt.sign(
-      { id: user._id, role: user.role },
+      { id: user._id, role: user.role, sessionId: session._id },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
     );
 
-    res.json({ success: true, message: 'MFA verified successfully', token: tokenJwt });
+    res.json({ success: true, message: 'MFA verified successfully', token: tokenJwt, sessionId: session._id });
   } catch (err) {
     next(err);
   }
@@ -963,13 +965,44 @@ async function changePassword(req, res, next) {
       updatedAt: new Date().toISOString(),
     });
 
-    res.json({ success: true, message: 'Password changed successfully.' });
-  } catch (err) {
-    console.error('Change password error:', err);
-    next(err);
-  }
-}
+    async function listSessions(req, res, next) {
+      try {
+        if (!req.user) return res.status(401).json({ success: false, message: 'Unauthorized' });
+        const sessions = await Session.findByUserId(String(req.user._id));
+        res.json({ success: true, sessions });
+      } catch (err) {
+        next(err);
+      }
+    }
 
+    async function revokeSession(req, res, next) {
+      try {
+        const { id } = req.params;
+        const session = await Session.findById(id);
+        if (!session || String(session.userId) !== String(req.user._id)) {
+          return res.status(404).json({ success: false, message: 'Session not found or forbidden' });
+        }
+        await Session.revoke(id);
+        res.json({ success: true, message: 'Session revoked' });
+      } catch (err) {
+        next(err);
+      }
+    }
 
+    async function revokeAllOtherSessions(req, res, next) {
+      try {
+        const sessions = await Session.findByUserId(String(req.user._id));
+        const currentSessionId = req.user.sessionId;
 
-module.exports = { register, login, getProfile, changePassword, refreshToken, bulkRegister, forgotPassword, resetPassword, verifyMfa, enableAppMfa, verifyAppMfaSetup, toggleEmailMfa, disableAllMfa, };
+        for (const s of sessions) {
+          if (s._id !== currentSessionId) {
+            await Session.revoke(s._id);
+          }
+        }
+        res.json({ success: true, message: 'Other sessions revoked' });
+      } catch (err) {
+        next(err);
+      }
+    }
+
+    module.exports = { register, login, getProfile, changePassword, refreshToken, bulkRegister, forgotPassword, resetPassword, verifyMfa, enableAppMfa, verifyAppMfaSetup, toggleEmailMfa, disableAllMfa, listSessions, revokeSession, revokeAllOtherSessions };
