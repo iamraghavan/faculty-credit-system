@@ -965,44 +965,51 @@ async function changePassword(req, res, next) {
       updatedAt: new Date().toISOString(),
     });
 
-    async function listSessions(req, res, next) {
-      try {
-        if (!req.user) return res.status(401).json({ success: false, message: 'Unauthorized' });
-        const sessions = await Session.findByUserId(String(req.user._id));
-        res.json({ success: true, sessions });
-      } catch (err) {
-        next(err);
+    res.json({ success: true, message: 'Password changed successfully.' });
+  } catch (err) {
+    console.error('Change password error:', err);
+    next(err);
+  }
+}
+
+async function listSessions(req, res, next) {
+  try {
+    if (!req.user) return res.status(401).json({ success: false, message: 'Unauthorized' });
+    const sessions = await Session.findByUserId(String(req.user._id));
+    res.json({ success: true, sessions });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function revokeSession(req, res, next) {
+  try {
+    const { id } = req.params;
+    const session = await Session.findById(id);
+    if (!session || String(session.userId) !== String(req.user._id)) {
+      return res.status(404).json({ success: false, message: 'Session not found or forbidden' });
+    }
+    await Session.revoke(id);
+    res.json({ success: true, message: 'Session revoked' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function revokeAllOtherSessions(req, res, next) {
+  try {
+    const sessions = await Session.findByUserId(String(req.user._id));
+    const currentSessionId = req.user.sessionId;
+
+    for (const s of sessions) {
+      if (s._id !== currentSessionId) {
+        await Session.revoke(s._id);
       }
     }
+    res.json({ success: true, message: 'Other sessions revoked' });
+  } catch (err) {
+    next(err);
+  }
+}
 
-    async function revokeSession(req, res, next) {
-      try {
-        const { id } = req.params;
-        const session = await Session.findById(id);
-        if (!session || String(session.userId) !== String(req.user._id)) {
-          return res.status(404).json({ success: false, message: 'Session not found or forbidden' });
-        }
-        await Session.revoke(id);
-        res.json({ success: true, message: 'Session revoked' });
-      } catch (err) {
-        next(err);
-      }
-    }
-
-    async function revokeAllOtherSessions(req, res, next) {
-      try {
-        const sessions = await Session.findByUserId(String(req.user._id));
-        const currentSessionId = req.user.sessionId;
-
-        for (const s of sessions) {
-          if (s._id !== currentSessionId) {
-            await Session.revoke(s._id);
-          }
-        }
-        res.json({ success: true, message: 'Other sessions revoked' });
-      } catch (err) {
-        next(err);
-      }
-    }
-
-    module.exports = { register, login, getProfile, changePassword, refreshToken, bulkRegister, forgotPassword, resetPassword, verifyMfa, enableAppMfa, verifyAppMfaSetup, toggleEmailMfa, disableAllMfa, listSessions, revokeSession, revokeAllOtherSessions };
+module.exports = { register, login, getProfile, changePassword, refreshToken, bulkRegister, forgotPassword, resetPassword, verifyMfa, enableAppMfa, verifyAppMfaSetup, toggleEmailMfa, disableAllMfa, listSessions, revokeSession, revokeAllOtherSessions };

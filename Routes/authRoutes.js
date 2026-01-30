@@ -3,9 +3,9 @@ const express = require('express');
 const router = express.Router();
 const {
   refreshToken,
-  // keeping others that weren't moved yet
   verifyMfa, getProfile, changePassword,
-  toggleEmailMfa, disableAllMfa // assuming MfaController only took a few
+  toggleEmailMfa, disableAllMfa,
+  listSessions, revokeSession, revokeAllOtherSessions
 } = require('../Controllers/authController');
 
 const { register, login } = require('../Controllers/Auth/AuthenticationController');
