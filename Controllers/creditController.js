@@ -202,7 +202,7 @@ async function adminIssueNegativeCredit(req, res, next) {
       to: faculty.email,
       subject: `Negative Credit Issued: ${ct.title}`,
       text: `A negative credit (${ct.points}) has been issued against you for ${academicYear}. Reason: ${notes || 'Not provided'}`,
-    }).catch(() => {});
+    }).catch(() => { });
 
     return res.status(201).json({ success: true, data: c });
   } catch (err) {
@@ -836,6 +836,119 @@ async function getFacultyCredits(req, res, next) {
 }
 
 
+async function updatePositiveCredit(req, res, next) {
+  try {
+    await ensureDb();
+    const { creditId } = req.params;
+    const { title, points, academicYear, points: pointsBody, notes } = req.body; // points might be string
+    const faculty = req.user;
+
+    const credit = await Credit.findById(creditId);
+    if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
+
+    if (String(credit.faculty) !== String(faculty._id)) return res.status(403).json({ success: false, message: 'Unauthorized' });
+    if (credit.status !== 'pending') return res.status(400).json({ success: false, message: 'Can only edit pending credits' });
+
+    let updates = {};
+    if (title) updates.title = title;
+    if (points) updates.points = Number(points);
+    if (academicYear) updates.academicYear = academicYear;
+    if (notes !== undefined) updates.notes = notes;
+
+    if (req.file) {
+      const { proofUrl, proofMeta } = await handleFileUpload(req.file, `credits/${updates.academicYear || credit.academicYear}`);
+      updates.proofUrl = proofUrl;
+      updates.proofMeta = proofMeta;
+    }
+
+    updates.updatedAt = new Date().toISOString();
+
+    await Credit.update(creditId, updates);
+    const updated = await Credit.findById(creditId);
+
+    io.emit(`faculty:${faculty._id}:creditUpdate`, updated);
+
+    res.json({ success: true, data: updated });
+  } catch (err) { next(err); }
+}
+
+async function deletePositiveCredit(req, res, next) {
+  try {
+    await ensureDb();
+    const { creditId } = req.params;
+    const faculty = req.user;
+    const credit = await Credit.findById(creditId);
+    if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
+    if (String(credit.faculty) !== String(faculty._id)) return res.status(403).json({ success: false, message: 'Unauthorized' });
+    if (credit.status !== 'pending') return res.status(400).json({ success: false, message: 'Can only delete pending credits' });
+
+    await Credit.delete(creditId);
+    res.json({ success: true, message: 'Credit deleted' });
+  } catch (err) { next(err); }
+}
+
+async function updateAppeal(req, res, next) {
+  try {
+    await ensureDb();
+    const { creditId } = req.params;
+    const { reason } = req.body;
+    const faculty = req.user;
+
+    const credit = await Credit.findById(creditId);
+    if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
+    if (credit.type !== 'negative') return res.status(400).json({ success: false, message: 'Not a negative credit' });
+    if (String(credit.faculty) !== String(faculty._id)) return res.status(403).json({ success: false, message: 'Unauthorized' });
+
+    if (!credit.appeal || credit.status !== 'appealed') {
+      return res.status(400).json({ success: false, message: 'No active appeal found to edit' });
+    }
+    if (credit.appeal.status !== 'pending') return res.status(400).json({ success: false, message: 'Cannot edit processed appeal' });
+
+    const newAppeal = { ...credit.appeal };
+    if (reason) newAppeal.reason = reason;
+
+    if (req.file) {
+      const { proofUrl, proofMeta } = await handleFileUpload(req.file, `appeals/${creditId}`);
+      newAppeal.proofUrl = proofUrl;
+      newAppeal.proofMeta = proofMeta;
+    }
+
+    await Credit.update(creditId, { appeal: newAppeal, updatedAt: new Date().toISOString() });
+    const updated = await Credit.findById(creditId);
+
+    io.emit(`faculty:${faculty._id}:creditUpdate`, updated);
+    res.json({ success: true, data: updated });
+  } catch (err) { next(err); }
+}
+
+async function deleteAppeal(req, res, next) {
+  try {
+    await ensureDb();
+    const { creditId } = req.params;
+    const faculty = req.user;
+
+    const credit = await Credit.findById(creditId);
+    if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
+    if (String(credit.faculty) !== String(faculty._id)) return res.status(403).json({ success: false, message: 'Unauthorized' });
+
+    if (!credit.appeal) {
+      return res.status(400).json({ success: false, message: 'No active appeal to delete' });
+    }
+
+    if (credit.appeal.status !== 'pending') return res.status(400).json({ success: false, message: 'Cannot delete processed appeal' });
+
+    await Credit.update(creditId, {
+      appeal: null,
+      status: 'pending', // Revert to pending
+      updatedAt: new Date().toISOString()
+    });
+
+    const updated = await Credit.findById(creditId);
+    io.emit(`faculty:${faculty._id}:creditUpdate`, updated);
+    res.json({ success: true, message: 'Appeal withdrawn', data: updated });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   submitPositiveCredit,
   appealNegativeCredit,
@@ -847,4 +960,8 @@ module.exports = {
   getNegativeCreditsByFacultyId,
   recalcCreditsController,
   getFacultyCredits,
+  updatePositiveCredit,
+  deletePositiveCredit,
+  updateAppeal,
+  deleteAppeal,
 };

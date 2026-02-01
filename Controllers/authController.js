@@ -128,6 +128,9 @@ async function login(req, res, next) {
 
     // 🔸 If MFA is NOT enabled — issue token directly
     if (!user.mfaEnabled) {
+      // Clear existing sessions for this user to prevent duplicates
+      await Session.deleteByUserId(user._id);
+
       // Create Session
       const session = await Session.create({
         userId: user._id,
@@ -163,6 +166,9 @@ async function login(req, res, next) {
       const valid = verifyTotpToken(user.mfaSecret, actualMfaToken);
       if (!valid)
         return res.status(400).json({ success: false, message: 'Invalid MFA code' });
+
+      // Clear existing sessions for this user to prevent duplicates
+      await Session.deleteByUserId(user._id);
 
       // Create Session
       const session = await Session.create({
@@ -879,6 +885,9 @@ async function verifyMfa(req, res, next) {
     if (!verified) {
       return res.status(400).json({ success: false, message: 'Invalid or expired MFA code' });
     }
+
+    // Clear existing sessions for this user to prevent duplicates
+    await Session.deleteByUserId(user._id);
 
     // Create Session
     const session = await Session.create({

@@ -102,5 +102,22 @@ module.exports = {
             new DeleteCommand({ TableName: TABLE, Key: { _id: id } })
         );
         return { deleted: true };
+    },
+
+    /**
+     * Delete all sessions for a user
+     */
+    async deleteByUserId(userId) {
+        const sessions = await this.findByUserId(userId);
+        if (sessions.length > 0) {
+            const client = getDynamoClient();
+            // Delete in parallel
+            await Promise.all(
+                sessions.map((s) =>
+                    client.send(new DeleteCommand({ TableName: TABLE, Key: { _id: s._id } }))
+                )
+            );
+        }
+        return { deletedCount: sessions.length };
     }
 };
