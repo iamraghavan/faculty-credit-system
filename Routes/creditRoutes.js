@@ -16,7 +16,9 @@ const {
   deletePositiveCredit,
   updateAppeal,
   deleteAppeal,
-  getSingleCredit
+  getSingleCredit,
+  updateNegativeCredit,
+  deleteNegativeCredit
 } = require('../Controllers/creditController');
 
 const { authMiddleware, adminOnly } = require('../Middleware/authMiddleware');
@@ -52,6 +54,8 @@ router.get('/credits/faculty/:facultyId', authMiddleware, listCreditsForFaculty)
 router.post('/credit-title', authMiddleware, adminOnly, createCreditTitle);
 router.get('/credit-title', authMiddleware, listCreditTitles);
 router.post('/credits/negative', authMiddleware, adminOnly, upload.single('proof'), adminIssueNegativeCredit);
+router.put('/credits/negative/:creditId', authMiddleware, adminOnly, upload.single('proof'), updateNegativeCredit);
+router.delete('/credits/negative/:creditId', authMiddleware, adminOnly, deleteNegativeCredit);
 
 // Faculty: get all negative credits (with filters)
 router.get('/credits/negative', authMiddleware, getNegativeCredits);
