@@ -825,32 +825,40 @@ async function disableAllMfa(req, res, next) {
 }
 async function verifyMfa(req, res, next) {
   try {
-    const { userId: bodyUserId, code: bodyCode, token: bodyToken } = req.body;
+    const { userId: bodyUserId, email, code: bodyCode, token: bodyToken, type } = req.body;
     const code = bodyCode || bodyToken; // accept either
-    const userId = bodyUserId || (req.user ? (req.user._id || req.user.id) : null);
 
-    if (!userId) {
-      return res.status(400).json({ success: false, message: 'User ID is required for verification' });
+    // Resolve User: try userId first, then email, then authenticated user
+    let resolvedUserId = bodyUserId || (req.user ? (req.user._id || req.user.id) : null);
+    let user = null;
+
+    if (resolvedUserId) {
+      user = await User.findById(resolvedUserId);
+    } else if (email) {
+      const users = await User.find({ email: email.toLowerCase().trim() });
+      if (users && users.length > 0) {
+        user = users[0];
+      }
+    }
+
+    if (!user) {
+      return res.status(400).json({ success: false, message: 'User not found. Please provide userId or email.' });
     }
 
     if (!code) {
       return res.status(400).json({ success: false, message: 'MFA code is required' });
     }
 
-    const user = await User.findById(userId);
-    if (!user) return res.status(400).json({ success: false, message: 'User not found' });
-
     // Check if any MFA is enabled
     if (!user.mfaEmailEnabled && !user.mfaAppEnabled)
       return res.status(400).json({ success: false, message: 'MFA not enabled for this user' });
 
     let verified = false;
-    let type = req.body.type; // 'app' or 'email' (optional hint)
 
     // 1. Try App MFA (TOTP)
     // Check if user has app MFA enabled and if type hint matches (or is absent)
     if (user.mfaAppEnabled && (!type || type === 'app')) {
-      // Verify TOTP
+      // Verify TOTP if code is adequate length (usually 6)
       if (verifyTotpToken(user.mfaSecret, code)) {
         verified = true;
       }
