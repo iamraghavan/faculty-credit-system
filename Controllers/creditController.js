@@ -949,6 +949,28 @@ async function deleteAppeal(req, res, next) {
   } catch (err) { next(err); }
 }
 
+async function getSingleCredit(req, res, next) {
+  try {
+    await ensureDb();
+    const { creditId } = req.params;
+    const user = req.user;
+
+    const credit = await Credit.findById(creditId);
+    if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
+
+    // Access Control:
+    // 1. Admin/OA can see any credit
+    // 2. Faculty can only see their own credits
+    if (user.role === 'faculty' && String(credit.faculty) !== String(user._id)) {
+      return res.status(403).json({ success: false, message: 'Unauthorized access to this credit' });
+    }
+
+    return res.json({ success: true, data: credit });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   submitPositiveCredit,
   appealNegativeCredit,
@@ -964,4 +986,5 @@ module.exports = {
   deletePositiveCredit,
   updateAppeal,
   deleteAppeal,
+  getSingleCredit,
 };

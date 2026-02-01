@@ -15,7 +15,8 @@ const {
   updatePositiveCredit,
   deletePositiveCredit,
   updateAppeal,
-  deleteAppeal
+  deleteAppeal,
+  getSingleCredit
 } = require('../Controllers/creditController');
 
 const { authMiddleware, adminOnly } = require('../Middleware/authMiddleware');
@@ -59,6 +60,9 @@ router.get('/credits/negative', authMiddleware, getNegativeCredits);
 router.post('/credits/:creditId/appeal', authMiddleware, upload.single('proof'), appealNegativeCredit);
 router.put('/credits/appeals/:creditId', authMiddleware, upload.single('proof'), updateAppeal);
 router.delete('/credits/appeals/:creditId', authMiddleware, deleteAppeal);
+
+// Get Single Credit details
+router.get('/credits/:creditId', authMiddleware, getSingleCredit);
 
 router.get(
   '/credits/faculty/:facultyId/negative',
