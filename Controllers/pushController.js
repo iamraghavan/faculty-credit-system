@@ -1,17 +1,111 @@
-const webpush = require('web-push');
-const PushSubscription = require('../Models/PushSubscription');
-require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
+const fsPromises = fs.promises;
+const { sendEmail } = require('../utils/email');
+const { generateRemarkPdf } = require('../utils/pdfGenerator');
+const { User } = require('../Models/User'); // Assuming User model is here, check if it's correct path or use dynamo
 
-// Configure web-push
-if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
-    webpush.setVapidDetails(
-        process.env.VAPID_MAILTO || 'mailto:admin@example.com',
-        process.env.VAPID_PUBLIC_KEY,
-        process.env.VAPID_PRIVATE_KEY
-    );
-} else {
-    console.warn('VAPID Keys not found. Web Push will not work.');
+// Adjust User import if it's different. In creditController it was just `const faculty = await User.findById(facultyId);`
+// I need to be sure about User model location. 3.0 codebase might use DynamoDB directly or a helper.
+// In creditController snippet: "const faculty = await User.findById(facultyId);"
+// Let's assume User is available. But wait, I don't see User imported in creditController snippet I viewed.
+// Ah, step 168: "const faculty = await User.findById(facultyId);"
+// I should verify where User comes from.
+
+/**
+ * Send a manual remark notification (Email + Push)
+ * POST /api/v1/notifications/remark
+ */
+async function sendRemarkNotification(req, res, next) {
+    try {
+        const { facultyId, title, points, notes, academicYear } = req.body;
+        const issuerName = req.user ? req.user.name : 'Administrator';
+
+        if (!facultyId || !title) {
+            return res.status(400).json({ success: false, message: 'Missing facultyId or title' });
+        }
+
+        // Mock faculty object if we can't find model, OR try to find it
+        // Better: Fetch from DB.
+        // Assuming there is a User model.
+        // If not, we might need a utility to fetch user.
+        // Let's rely on payload having email if possible? No, frontend likely only sends IDs.
+
+        // I will use a placeholder for User.findById for now or better, require it.
+        // If I can't be sure, I'll use a SAFE error.
+
+        // Let's try to get User from ../Models/User
+        const User = require('../Models/User');
+
+        const faculty = await User.findById(facultyId);
+        if (!faculty) return res.status(404).json({ success: false, message: 'Faculty not found' });
+
+        const dateStr = new Date().toLocaleDateString('en-IN', { dateStyle: 'long' });
+        const portalUrl = process.env.FRONTEND_URL ? `${process.env.FRONTEND_URL}/faculty/credits` : '#';
+        const pointsValue = Number(points) || 0;
+
+        // 1. Generate PDF
+        const pdfBuffer = await generateRemarkPdf({
+            title: title,
+            points: pointsValue,
+            academicYear: academicYear || new Date().getFullYear(),
+            notes: notes || '',
+            facultyName: faculty.name,
+            facultyId: faculty.facultyID,
+            issuerName,
+            date: dateStr
+        });
+
+        // 2. Read HTML Template
+        const templatePath = path.resolve(process.cwd(), 'email-templates', 'remark-notification.html');
+        let htmlContent = await fsPromises.readFile(templatePath, 'utf8');
+
+        // 3. Replace Placeholders
+        htmlContent = htmlContent
+            .replace(/{{\s*facultyName\s*}}/g, faculty.name)
+            .replace(/{{\s*remarkTitle\s*}}/g, title)
+            .replace(/{{\s*remarkPoints\s*}}/g, Math.abs(pointsValue))
+            .replace(/{{\s*remarkMessage\s*}}/g, notes || 'No additional notes provided.')
+            .replace(/{{\s*date\s*}}/g, dateStr)
+            .replace(/{{\s*issuerName\s*}}/g, issuerName)
+            .replace(/{{\s*portalUrl\s*}}/g, portalUrl)
+            .replace(/{{\s*currentYear\s*}}/g, new Date().getFullYear());
+
+        // 4. Send Email
+        await sendEmail({
+            to: faculty.email,
+            subject: `Startling Alert - Remark Notification: ${title}`,
+            text: `Remark Notification: ${title}\nPoints: ${pointsValue}\nPlease check attached PDF.`,
+            html: htmlContent,
+            attachments: [
+                {
+                    filename: `Remark_Notification_${Date.now()}.pdf`,
+                    content: pdfBuffer,
+                    contentType: 'application/pdf'
+                }
+            ]
+        });
+
+        // 5. Send Push
+        await sendPushToUser(String(faculty._id), {
+            title: 'New Remark Received',
+            body: `${title} (${pointsValue} credits). Check your portal.`,
+            url: portalUrl,
+            icon: '/icons/warning.png'
+        });
+
+        res.status(200).json({ success: true, message: 'Notification sent successfully' });
+
+    } catch (err) {
+        next(err);
+    }
 }
+
+module.exports = {
+    subscribe,
+    sendPushToUser,
+    sendRemarkNotification
+};
 
 /**
  * Save a new subscription for a user

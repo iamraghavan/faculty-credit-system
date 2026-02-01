@@ -44,6 +44,9 @@ app.use(healthRouter);
 // Rate limiting
 app.use(rateLimitMiddleware);
 
+// Serve static files from 'public' directory
+app.use(express.static('public'));
+
 // Redirect root and /login routes
 app.get(['/', '/login'], (req, res) => {
   res.redirect('https://fcs.egspgroup.in/u/portal/auth?faculty_login');
