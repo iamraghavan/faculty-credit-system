@@ -35,7 +35,7 @@ function createTransporter() {
   const secure =
     String(EMAIL_SECURE).toLowerCase() === 'true' ? true
       : String(EMAIL_SECURE).toLowerCase() === 'false' ? false
-      : (port === 465); // auto: 465 => secure:true, otherwise false (STARTTLS)
+        : (port === 465); // auto: 465 => secure:true, otherwise false (STARTTLS)
 
   const opts = {
     host: EMAIL_HOST,
@@ -74,7 +74,7 @@ function createTransporter() {
  *
  * IMPORTANT: For Gmail / Google Workspace, use an App Password (if account has 2FA) and put it in EMAIL_PASS.
  */
-async function sendEmail({ to, subject, text, html }, retries = 2) {
+async function sendEmail({ to, subject, text, html, attachments }, retries = 2) {
   const transporter = createTransporter();
 
   // Verify transporter first — helpful to catch auth/whitelisting/TLS issues early.
@@ -104,6 +104,7 @@ async function sendEmail({ to, subject, text, html }, retries = 2) {
         subject,
         text,
         html,
+        attachments,
       });
       console.log(`Email sent to ${to} (attempt ${attempt})`, info && info.messageId ? `messageId=${info.messageId}` : '');
       return { sent: true, info };

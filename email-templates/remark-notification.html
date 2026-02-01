@@ -1,197 +1,222 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Remark Notification</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
-        
         body {
+            font-family: 'Roboto', Helvetica, Arial, sans-serif;
+            background-color: #f4f6f8;
             margin: 0;
             padding: 0;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-            background-color: #f1f3f6;
-            font-family: 'Roboto', Arial, sans-serif;
+            -webkit-text-size-adjust: 100%;
         }
-        .email-container {
+
+        .container {
             max-width: 600px;
             margin: 20px auto;
-            background-color: #ffffff;
+            background: #ffffff;
             border-radius: 8px;
             overflow: hidden;
-            border: 1px solid #e2e8f0;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
         }
-        .email-header {
-            background-color: #001b70;
+
+        .header {
+            background: linear-gradient(135deg, #001b70 0%, #0033cc 100%);
+            padding: 30px 20px;
+            text-align: center;
+        }
+
+        .header img {
+            height: 50px;
+            background: #fff;
+            padding: 5px;
+            border-radius: 4px;
+        }
+
+        .header h1 {
             color: #ffffff;
-            padding: 24px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .email-header img {
-            max-width: 100px;
-            background-color: white;
-            padding:4px;
-            border-radius: 3px;
-        }
-        .email-header h1 {
-            margin: 0;
-            font-size: 24px;
+            margin: 15px 0 0;
+            font-size: 22px;
             font-weight: 700;
         }
-        .email-body {
-            padding: 32px;
-            color: #333333;
-            line-height: 1.6;
+
+        .content {
+            padding: 30px;
         }
-        .email-body p {
-            margin: 0 0 16px;
+
+        .greeting {
+            font-size: 16px;
+            color: #333;
+            margin-bottom: 20px;
         }
-        .remark-details {
-            border: 1px solid #dfe3e8;
+
+        .card {
+            background-color: #f9fafb;
+            border: 1px solid #e5e7eb;
             border-radius: 6px;
-            margin: 24px 0;
-            padding: 0;
+            padding: 20px;
+            margin-bottom: 25px;
         }
-        .remark-details h3 {
-            margin: 0;
-            padding: 16px;
-            background-color: #f9fafb;
-            border-bottom: 1px solid #dfe3e8;
-            color: #001b70;
-            font-size: 16px;
+
+        .card-header {
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+            font-size: 14px;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
             font-weight: 700;
         }
-        .remark-details-content {
-            padding: 16px;
-        }
-        .detail-item {
+
+        .row {
             display: flex;
             justify-content: space-between;
-            padding: 10px 0;
-            border-bottom: 1px solid #f1f3f6;
+            margin-bottom: 12px;
+            font-size: 14px;
         }
-        .detail-item:last-child {
-            border-bottom: none;
+
+        .row:last-child {
+            margin-bottom: 0;
         }
-        .detail-item strong {
+
+        .label {
             color: #6b7280;
-            margin-right: 10px;
             font-weight: 500;
         }
-        .detail-item span {
-            text-align: right;
+
+        .value {
             color: #111827;
+            font-weight: 600;
+            text-align: right;
         }
-        .remark-points {
-            font-weight: 700;
-            color: #af005f; /* Accent color for negative points */
+
+        .negative {
+            color: #dc2626;
         }
-        .cta-button-container {
+
+        .notes-box {
+            background-color: #fff;
+            border: 1px dashed #d1d5db;
+            padding: 15px;
+            border-radius: 4px;
+            font-size: 14px;
+            color: #4b5563;
+            line-height: 1.5;
+        }
+
+        .btn-container {
             text-align: center;
-            margin: 24px 0;
+            margin: 30px 0;
         }
-        .cta-button {
-            display: inline-block;
+
+        .btn {
             background-color: #001b70;
-            color: #ffffff;
-            padding: 12px 30px;
-            text-align: center;
+            color: #ffffff !important;
+            padding: 14px 28px;
             text-decoration: none;
-            border-radius: 5px;
-            font-weight: 500;
-            font-size: 16px;
-            transition: background-color 0.2s;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 15px;
+            display: inline-block;
+            box-shadow: 0 2px 4px rgba(0, 27, 112, 0.3);
         }
-        .cta-button:hover {
-            background-color: #00278a;
+
+        .btn:hover {
+            background-color: #001350;
         }
-        .email-footer {
-            background-color: #f9fafb;
-            color: #6b7280;
-            padding: 24px;
+
+        .footer {
+            background-color: #f3f4f6;
+            padding: 20px;
             text-align: center;
             font-size: 12px;
-            border-top: 1px solid #e2e8f0;
+            color: #9ca3af;
         }
-        .email-footer p {
-            margin: 0 0 8px;
-        }
-        .email-footer a {
-            color: #001b70;
-            text-decoration: none;
-        }
-        .email-footer a:hover {
+
+        .footer a {
+            color: #6b7280;
             text-decoration: underline;
         }
-        @media screen and (max-width: 600px) {
-            .email-container {
+
+        /* Mobile handling */
+        @media only screen and (max-width: 600px) {
+            .container {
                 width: 100% !important;
-                margin: 0;
+                margin: 0 !important;
                 border-radius: 0;
-                border: none;
             }
-            .email-body {
-                padding: 24px;
-            }
-            .email-header {
-                flex-direction: column;
-                gap: 16px;
+
+            .content {
+                padding: 20px;
             }
         }
     </style>
 </head>
+
 <body>
-    <div class="email-container">
-        <div class="email-header">
+    <div class="container">
+        <!-- Brand Header -->
+        <div class="header">
+            <img src="https://egspgroup.in/assets/egspgoi___logo.webp" alt="EGSPGOI Logo">
             <h1>Remark Notification</h1>
-            <img src="https://egspgroup.in/assets/egspgoi___logo.webp" alt="College Logo">
         </div>
-        <div class="email-body">
-            <p>Dear {{facultyName}},</p>
-            <p>This notification is to inform you that a new remark has been recorded by an administrator in the Faculty Credit System. Please review the details below.</p>
-            
-            <div class="remark-details">
-                <h3>Remark Summary</h3>
-                <div class="remark-details-content">
-                    <div class="detail-item">
-                        <strong>Title:</strong>
-                        <span>{{remarkTitle}}</span>
-                    </div>
-                    <div class="detail-item">
-                        <strong>Credit Points:</strong>
-                        <span class="remark-points">{{remarkPoints}}</span>
-                    </div>
-                     <div class="detail-item">
-                        <strong>Date Issued:</strong>
-                        <span>{{date}}</span>
-                    </div>
-                    <div class="detail-item">
-                        <strong>Notes from Admin:</strong>
-                        <span>{{remarkMessage}}</span>
-                    </div>
+
+        <!-- Main Content -->
+        <div class="content">
+            <p class="greeting">Hello {{facultyName}},</p>
+            <p style="color: #4b5563; line-height: 1.6;">
+                An official remark has been recorded against your faculty profile. A detailed report is attached as a
+                PDF for your records.
+            </p>
+
+            <!-- Summary Card -->
+            <div class="card">
+                <div class="card-header">Remark Summary</div>
+
+                <div class="row">
+                    <span class="label">Date Issued</span>
+                    <span class="value">{{date}}</span>
+                </div>
+                <div class="row">
+                    <span class="label">Issued By</span>
+                    <span class="value">{{issuerName}}</span>
+                </div>
+                <div class="row" style="margin-top: 15px; border-top: 1px solid #e5e7eb; padding-top: 15px;">
+                    <span class="label">Total Decrease</span>
+                    <span class="value negative">{{remarkPoints}} Credits</span>
                 </div>
             </div>
 
-            <p>You can view this remark in detail and, if necessary, submit an appeal by logging into your faculty portal.</p>
-            
-            <div class="cta-button-container">
-                <a href="{{portalUrl}}" class="cta-button">Go to Portal</a>
+            <p style="font-weight: 500; font-size: 14px; margin-bottom: 8px;">Admin Notes:</p>
+            <div class="notes-box">
+                "{{remarkMessage}}"
             </div>
 
-            <p>If you have any questions, please start a conversation regarding this remark from the portal.</p>
-            <p style="margin-top: 25px;">Thank you,<br>EGS Pillay Administration</p>
-        </div>
-        <div class="email-footer">
-            <p>&copy; {{currentYear}} E.G.S. Pillay Group of Institutions. All rights reserved.</p>
-            <p>This is an automated message. Please do not reply to this email.</p>
-            <p>
-                <a href="#">Privacy Policy</a> &bull; <a href="#">Contact Us</a>
+            <!-- CTA -->
+            <div class="btn-container">
+                <a href="{{portalUrl}}" class="btn">View & Appeal on Portal</a>
+            </div>
+
+            <p style="font-size: 13px; color: #6b7280; text-align: center;">
+                If you believe this is an error, you can submit an appeal directly through the faculty portal within the
+                stipulated time.
             </p>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p>&copy; {{currentYear}} E.G.S. Pillay Group of Institutions.</p>
+            <p>
+                <a href="#">Help Center</a> • <a href="#">Privacy Policy</a>
+            </p>
+            <p>Nagapattinam - 611002, Tamil Nadu, India.</p>
         </div>
     </div>
 </body>
+
 </html>

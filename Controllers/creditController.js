@@ -5,8 +5,11 @@ const User = require('../Models/User'); // assuming this is still mongoose-backe
 const CreditTitle = require('../Models/CreditTitle');
 const { uploadFileToGitHub, uploadFileToGitHubBuffer } = require('../utils/githubUpload');
 const fs = require('fs');
+const fsPromises = require('fs').promises; // Add for async reads
 const path = require('path');
 const { sendEmail } = require('../utils/email');
+const { generateRemarkPdf } = require('../utils/pdfGenerator');
+const { sendPushToUser } = require('../Controllers/pushController');
 const { recalcFacultyCredits } = require('../utils/calculateCredits');
 const io = require('../socket');
 const { connectDB } = require('../config/db');
@@ -173,6 +176,8 @@ async function adminIssueNegativeCredit(req, res, next) {
 
     const { proofUrl, proofMeta } = await handleFileUpload(req.file, academicYear);
 
+    const pointsValue = -Math.abs(Number(ct.points || 0));
+
     const c = await Credit.create({
       faculty: String(faculty._id),
       facultySnapshot: {
@@ -183,7 +188,7 @@ async function adminIssueNegativeCredit(req, res, next) {
       },
       type: 'negative',
       title: ct.title || ct._id,
-      points: -Math.abs(Number(ct.points || 0)),
+      points: pointsValue,
       proofUrl,
       proofMeta,
       academicYear,
@@ -197,12 +202,66 @@ async function adminIssueNegativeCredit(req, res, next) {
 
     io.emit(`faculty:${faculty._id}:creditUpdate`, c);
 
-    // send email (fire & forget)
-    sendEmail({
-      to: faculty.email,
-      subject: `Negative Credit Issued: ${ct.title}`,
-      text: `A negative credit (${ct.points}) has been issued against you for ${academicYear}. Reason: ${notes || 'Not provided'}`,
-    }).catch(() => { });
+    // --- Prepare Notification (Email + PDF) ---
+    try {
+      const issuerName = actor.name || 'Administrator';
+      const dateStr = new Date().toLocaleDateString('en-IN', { dateStyle: 'long' });
+      const portalUrl = process.env.FRONTEND_URL ? `${process.env.FRONTEND_URL}/faculty/credits` : '#';
+
+      // 1. Generate PDF
+      const pdfBuffer = await generateRemarkPdf({
+        title: ct.title,
+        points: pointsValue,
+        academicYear,
+        notes,
+        facultyName: faculty.name,
+        facultyId: faculty.facultyID,
+        issuerName,
+        date: dateStr
+      });
+
+      // 2. Read HTML Template
+      const templatePath = path.resolve(process.cwd(), 'email-templates', 'remark-notification.html');
+      let htmlContent = await fsPromises.readFile(templatePath, 'utf8');
+
+      // 3. Replace Placeholders
+      htmlContent = htmlContent
+        .replace(/{{\s*facultyName\s*}}/g, faculty.name)
+        .replace(/{{\s*remarkTitle\s*}}/g, ct.title)
+        .replace(/{{\s*remarkPoints\s*}}/g, Math.abs(pointsValue)) // Show absolute value in HTML usually
+        .replace(/{{\s*remarkMessage\s*}}/g, notes || 'No additional notes provided.')
+        .replace(/{{\s*date\s*}}/g, dateStr)
+        .replace(/{{\s*issuerName\s*}}/g, issuerName)
+        .replace(/{{\s*portalUrl\s*}}/g, portalUrl)
+        .replace(/{{\s*currentYear\s*}}/g, new Date().getFullYear());
+
+      // 4. Send Email with Attachment
+      await sendEmail({
+        to: faculty.email,
+        subject: `Startling Alert - Remark Notification: ${ct.title}`,
+        text: `Remark Notification: ${ct.title}\nPoints: ${pointsValue}\nPlease check the attached PDF for details.`,
+        html: htmlContent,
+        attachments: [
+          {
+            filename: `Remark_Notification_${Date.now()}.pdf`,
+            content: pdfBuffer,
+            contentType: 'application/pdf'
+          }
+        ]
+      });
+
+      // 5. Send Web Push Notification
+      sendPushToUser(String(faculty._id), {
+        title: 'New Remark Received',
+        body: `${ct.title} (${pointsValue} credits). Check your portal.`,
+        url: portalUrl,
+        icon: '/icons/warning.png' // Ensure this exists on frontend public
+      });
+
+    } catch (notifyErr) {
+      console.error('Failed to send remark notification:', notifyErr);
+      // Don't fail the request, just log
+    }
 
     return res.status(201).json({ success: true, data: c });
   } catch (err) {
