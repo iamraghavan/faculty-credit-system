@@ -848,9 +848,9 @@ async function verifyMfa(req, res, next) {
     let type = req.body.type; // 'app' or 'email' (optional hint)
 
     // 1. Try App MFA (TOTP)
+    // Check if user has app MFA enabled and if type hint matches (or is absent)
     if (user.mfaAppEnabled && (!type || type === 'app')) {
-      // Check if code is valid TOTP
-      // We assume code is 6 digit. 
+      // Verify TOTP
       if (verifyTotpToken(user.mfaSecret, code)) {
         verified = true;
       }
@@ -858,19 +858,18 @@ async function verifyMfa(req, res, next) {
 
     // 2. Try Email MFA (if not verified yet)
     if (!verified && user.mfaEmailEnabled && (!type || type === 'email')) {
+      // Check stored code
       if (user.mfaCode && user.mfaCodeExpires && Date.now() <= user.mfaCodeExpires) {
         if (String(user.mfaCode) === String(code)) {
           verified = true;
           // Clear used email code
           await User.update(user._id, { mfaCode: null, mfaCodeExpires: null });
         }
-      } else if (type === 'email') {
-        return res.status(400).json({ success: false, message: 'MFA code expired or invalid' });
       }
     }
 
     if (!verified) {
-      return res.status(400).json({ success: false, message: 'Invalid MFA code' });
+      return res.status(400).json({ success: false, message: 'Invalid or expired MFA code' });
     }
 
     // Create Session
