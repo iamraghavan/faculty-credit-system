@@ -10,7 +10,7 @@ const {
     QueryCommand
 } = require('@aws-sdk/lib-dynamodb');
 
-const TABLE = process.env.DYNAMO_DB_SESSIONS || 'fcs_sessions';
+const TABLE = process.env.DYNAMO_DB_SESSIONS || 'FacultyCreditsUsersSessions';
 
 module.exports = {
     /**
