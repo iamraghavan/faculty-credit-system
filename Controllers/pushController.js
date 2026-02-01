@@ -80,11 +80,18 @@ async function sendPushToUser(userId, payload) {
  */
 async function sendRemarkNotification(req, res, next) {
     try {
+        console.log('--- Send Remark Notification Request Received ---');
+        console.log('Body:', JSON.stringify(req.body, null, 2));
+
         const { facultyId, title, points, notes, academicYear } = req.body;
         const issuerName = req.user ? req.user.name : 'Administrator';
 
-        if (!facultyId || !title) {
-            return res.status(400).json({ success: false, message: 'Missing facultyId or title' });
+        // Support for "facultyID" (uppercase D) if frontend sends that
+        const targetFacultyId = facultyId || req.body.facultyID;
+
+        if (!targetFacultyId || !title) {
+            console.error(`Missing fields. facultyId: ${targetFacultyId}, title: ${title}`);
+            return res.status(400).json({ success: false, message: 'Missing facultyId or title. Check server logs for received body.' });
         }
 
         const User = require('../Models/User');
