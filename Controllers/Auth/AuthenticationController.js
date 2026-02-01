@@ -92,18 +92,18 @@ async function login(req, res, next) {
       // App MFA
       if (user.mfaAppEnabled) {
         if (!mfaToken) {
-            return res.json({ success: true, mfaRequired: true, mfaType: 'app' });
+          return res.json({ success: true, mfaRequired: true, mfaType: 'app', userId: user._id });
         }
         const valid = verifyTotpToken(user.mfaSecret, mfaToken);
         if (!valid) return res.status(400).json({ success: false, message: 'Invalid MFA code' });
-      } 
+      }
       // Email MFA
       else if (user.mfaEmailEnabled) {
         // Send code logic...
         const code = generateMfaCode();
         await User.update(user._id, { mfaCode: code, mfaCodeExpires: Date.now() + 300000 });
         await sendMfaEmail(user, code);
-        return res.json({ success: true, mfaRequired: true, mfaType: 'email' });
+        return res.json({ success: true, mfaRequired: true, mfaType: 'email', userId: user._id });
       }
     }
 

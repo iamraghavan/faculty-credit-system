@@ -838,16 +838,40 @@ async function verifyMfa(req, res, next) {
     }
 
     const user = await User.findById(userId);
-    if (!user || !user.mfaEmailEnabled)
-      return res.status(400).json({ success: false, message: 'MFA not enabled or user invalid' });
+    if (!user) return res.status(400).json({ success: false, message: 'User not found' });
 
-    if (!user.mfaCode || Date.now() > user.mfaCodeExpires)
-      return res.status(400).json({ success: false, message: 'MFA code expired' });
+    // Check if any MFA is enabled
+    if (!user.mfaEmailEnabled && !user.mfaAppEnabled)
+      return res.status(400).json({ success: false, message: 'MFA not enabled for this user' });
 
-    if (String(user.mfaCode) !== String(code))
+    let verified = false;
+    let type = req.body.type; // 'app' or 'email' (optional hint)
+
+    // 1. Try App MFA (TOTP)
+    if (user.mfaAppEnabled && (!type || type === 'app')) {
+      // Check if code is valid TOTP
+      // We assume code is 6 digit. 
+      if (verifyTotpToken(user.mfaSecret, code)) {
+        verified = true;
+      }
+    }
+
+    // 2. Try Email MFA (if not verified yet)
+    if (!verified && user.mfaEmailEnabled && (!type || type === 'email')) {
+      if (user.mfaCode && user.mfaCodeExpires && Date.now() <= user.mfaCodeExpires) {
+        if (String(user.mfaCode) === String(code)) {
+          verified = true;
+          // Clear used email code
+          await User.update(user._id, { mfaCode: null, mfaCodeExpires: null });
+        }
+      } else if (type === 'email') {
+        return res.status(400).json({ success: false, message: 'MFA code expired or invalid' });
+      }
+    }
+
+    if (!verified) {
       return res.status(400).json({ success: false, message: 'Invalid MFA code' });
-
-    await User.update(user._id, { mfaCode: null, mfaCodeExpires: null });
+    }
 
     // Create Session
     const session = await Session.create({
