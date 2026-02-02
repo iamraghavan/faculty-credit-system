@@ -74,7 +74,7 @@ function createTransporter() {
  *
  * IMPORTANT: For Gmail / Google Workspace, use an App Password (if account has 2FA) and put it in EMAIL_PASS.
  */
-async function sendEmail({ to, subject, text, html, attachments }, retries = 2) {
+async function sendEmail({ to, subject, text, html, attachments, headers }, retries = 2) {
   const transporter = createTransporter();
 
   // Verify transporter first — helpful to catch auth/whitelisting/TLS issues early.
@@ -105,6 +105,7 @@ async function sendEmail({ to, subject, text, html, attachments }, retries = 2) 
         text,
         html,
         attachments,
+        headers, // Pass custom headers (e.g. List-Unsubscribe)
       });
       console.log(`Email sent to ${to} (attempt ${attempt})`, info && info.messageId ? `messageId=${info.messageId}` : '');
       return { sent: true, info };

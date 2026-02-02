@@ -1,57 +1,213 @@
-<!-- email-templates/bulk-user.html -->
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>EGSPOGI - CreditWiseYour account has been created</title>
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <style>
-      /* Simple, email-safe styling */
-      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; background:#f6f6f6; margin:0; padding:0; }
-      .container { width:100%; max-width:600px; margin:32px auto; background:#ffffff; border-radius:8px; overflow:hidden; box-shadow:0 2px 6px rgba(0,0,0,0.08); }
-      .header { background:#004080; color:white; padding:18px 24px; }
-      .header h1 { margin:0; font-size:18px; font-weight:600; }
-      .content { padding:24px; color:#333333; line-height:1.5; }
-      .btn { display:inline-block; padding:10px 16px; background:#0073e6; color:white; text-decoration:none; border-radius:6px; margin-top:12px; }
-      .details { background:#f7f7f7; padding:12px; border-radius:6px; margin-top:12px; font-family:monospace; }
-      .footer { font-size:12px; color:#777; padding:16px 24px; text-align:center; }
-    </style>
-  </head>
-  <body>
-    <div class="container" role="article" aria-label="Account created">
-      <div class="header">
-        <h1>EGSPGOI - CreditWise</h1>
-      </div>
 
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Your Account Has Been Created</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+      background-color: #f4f6f9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+    }
+
+    .wrapper {
+      background-color: #f4f6f9;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background-color: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .header-blue-bar {
+      background-color: #001b70;
+      height: 5px;
+    }
+
+    .content {
+      padding: 40px;
+      color: #374151;
+      line-height: 1.6;
+    }
+
+    .logo {
+      max-width: 12rem;
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      font-size: 28px;
+      font-weight: 600;
+      color: #111827;
+      margin: 0 0 24px;
+    }
+
+    p {
+      margin: 0 0 16px;
+      font-size: 16px;
+    }
+
+    .summary-card {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      margin: 32px 0;
+      overflow: hidden;
+    }
+
+    .summary-card h2 {
+      margin: 0;
+      padding: 16px;
+      background-color: #f9fafb;
+      border-bottom: 1px solid #e5e7eb;
+      font-size: 16px;
+      font-weight: 600;
+      color: #111827;
+    }
+
+    .summary-table {
+      width: 100%;
+      padding: 8px 16px;
+    }
+
+    .summary-table td {
+      padding: 12px 0;
+      vertical-align: top;
+      font-size: 14px;
+      border-bottom: 1px solid #f3f4f6;
+    }
+
+    .summary-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .summary-table .label {
+      color: #6b7280;
+      font-weight: 500;
+      width: 40%;
+    }
+
+    .summary-table .value {
+      color: #111827;
+      font-weight: 500;
+      font-family: monospace;
+      font-size: 15px;
+    }
+
+    .button-container {
+      text-align: center;
+      margin: 32px 0;
+    }
+
+    .button {
+      display: inline-block;
+      background-color: #001b70;
+      color: #ffffff;
+      padding: 14px 28px;
+      border-radius: 6px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 16px;
+    }
+
+    .separator {
+      border: none;
+      border-top: 1px solid #e5e7eb;
+      margin: 32px 0;
+    }
+
+    .footer-text {
+      font-size: 14px;
+      color: #6b7280;
+      text-align: center;
+    }
+
+    .footer-text a {
+      color: #001b70;
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .final-footer {
+      padding: 24px;
+      text-align: center;
+      font-size: 12px;
+      color: #9ca3af;
+    }
+
+    .final-footer p {
+      margin: 0 0 5px;
+    }
+
+    .final-footer a {
+      color: #6b7280;
+      text-decoration: none;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrapper">
+    <div class="container">
+      <div class="header-blue-bar"></div>
       <div class="content">
+        <img src="https://egspgroup.in/assets/egspgoi___logo.webp" alt="E.G.S. Pillay Group of Institutions Logo"
+          class="logo">
+        <h1>Welcome to CreditWise</h1>
         <p>Hello <strong>{{name}}</strong>,</p>
+        <p>Your user account has been successfully created for <strong>{{college}}</strong>. You can use the credentials
+          below to sign in for the first time.</p>
 
-        <p>Your user account has been created for <strong>{{college}}</strong>. Use the credentials below to sign in for the first time.</p>
-
-        <div class="details">
-          <p><strong>Email:</strong> {{email}}</p>
-          <p><strong>Password:</strong> {{password}}</p>
-          <p><strong>Faculty ID:</strong> {{facultyID}}</p>
+        <div class="summary-card">
+          <h2>Account Details</h2>
+          <table class="summary-table" width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td class="label">Faculty ID</td>
+              <td class="value">{{facultyID}}</td>
+            </tr>
+            <tr>
+              <td class="label">Email Address</td>
+              <td class="value">{{email}}</td>
+            </tr>
+            <tr>
+              <td class="label">Temporary Password</td>
+              <td class="value">{{password}}</td>
+            </tr>
+          </table>
         </div>
 
-        <p>
-          Click the button below to go to the login page:
-        </p>
+        <p>Click the button below to access your account:</p>
 
-        <p>
-          <a class="btn" href="{{loginUrl}}" target="_blank" rel="noopener">Sign in to your account</a>
-        </p>
+        <div class="button-container">
+          <a href="{{loginUrl}}" class="button">Login to CreditWise</a>
+        </div>
 
-        <p>
-          For security, please change your password immediately after logging in. If you did not expect this email, please contact your administrator.
-        </p>
+        <p><strong>Security Tip:</strong> Please change your password immediately after your first login.</p>
 
-        <p>Regards,<br/>EGSPGOI - CreditWise team</p>
-      </div>
+        <hr class="separator">
 
-      <div class="footer">
-        <div>&copy; EGSPGOI. This is an automated message — please do not reply directly to this email.</div>
+        <div class="footer-text">
+          Having trouble? <a href="mailto:web@egspec.org">Contact our support team</a>.
+          <p style="margin-top: 16px; font-size: 14px; color: #6b7280;">Regards,<br>The CreditWise Team</p>
+        </div>
       </div>
     </div>
-  </body>
+    <div class="final-footer">
+      <p>&copy; 2024 E.G.S. Pillay Group of Institutions. All rights reserved.</p>
+      <p>Nagapattinam - 611002, Tamil Nadu, India</p>
+      <p>
+        <a href="#">Help Center</a> &bull; <a href="#">Privacy Policy</a>
+      </p>
+    </div>
+  </div>
+</body>
+
 </html>

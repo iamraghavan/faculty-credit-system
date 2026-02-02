@@ -70,10 +70,14 @@ async function sendRemarkNotification(req, res, next) {
       htmlContent = `<html><body><h3>${title}</h3><p>${message}</p></body></html>`;
     }
 
-    // 3. Render Template (Manual replacement to match previous working logic)
-    // If user has 'renderTemplate' utility, we could use it, but this is consistent with creditController logic
+    // 3. Render Template
+    // Add logging
+    console.log(`Rendering email template for Faculty: ${faculty.name} (${faculty.facultyID}), Points: ${pointsValue}`);
+
     htmlContent = htmlContent
       .replace(/{{\s*facultyName\s*}}/g, faculty.name)
+      .replace(/{{\s*facultyID\s*}}/g, faculty.facultyID || 'N/A')
+      .replace(/{{\s*academicYear\s*}}/g, academicYear)
       .replace(/{{\s*remarkTitle\s*}}/g, title)
       .replace(/{{\s*remarkPoints\s*}}/g, Math.abs(pointsValue))
       .replace(/{{\s*remarkMessage\s*}}/g, message || 'No notes provided.')

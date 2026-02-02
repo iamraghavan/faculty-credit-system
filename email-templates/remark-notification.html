@@ -4,217 +4,248 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Remark Notification</title>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <title>Official Remark Notification</title>
     <style>
         body {
-            font-family: 'Roboto', Helvetica, Arial, sans-serif;
-            background-color: #f4f6f8;
             margin: 0;
             padding: 0;
-            -webkit-text-size-adjust: 100%;
+            -webkit-font-smoothing: antialiased;
+            background-color: #f4f6f9;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+        }
+
+        .wrapper {
+            background-color: #f4f6f9;
+            padding: 20px;
         }
 
         .container {
             max-width: 600px;
-            margin: 20px auto;
-            background: #ffffff;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border: 1px solid #e5e7eb;
             border-radius: 8px;
             overflow: hidden;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
         }
 
-        .header {
-            background: linear-gradient(135deg, #001b70 0%, #0033cc 100%);
-            padding: 30px 20px;
-            text-align: center;
-        }
-
-        .header img {
-            height: 50px;
-            background: #fff;
-            padding: 5px;
-            border-radius: 4px;
-        }
-
-        .header h1 {
-            color: #ffffff;
-            margin: 15px 0 0;
-            font-size: 22px;
-            font-weight: 700;
+        .header-blue-bar {
+            background-color: #001b70;
+            height: 5px;
         }
 
         .content {
-            padding: 30px;
+            padding: 40px;
+            color: #374151;
+            line-height: 1.6;
         }
 
-        .greeting {
+        .logo {
+            max-width: 12rem;
+            margin-bottom: 24px;
+        }
+
+        h1 {
+            font-size: 28px;
+            font-weight: 600;
+            color: #111827;
+            margin: 0 0 24px;
+        }
+
+        p {
+            margin: 0 0 16px;
             font-size: 16px;
-            color: #333;
-            margin-bottom: 20px;
         }
 
-        .card {
-            background-color: #f9fafb;
+        .summary-card {
             border: 1px solid #e5e7eb;
-            border-radius: 6px;
-            padding: 20px;
-            margin-bottom: 25px;
+            border-radius: 8px;
+            margin: 32px 0;
         }
 
-        .card-header {
+        .summary-card h2 {
+            margin: 0;
+            padding: 16px;
+            background-color: #f9fafb;
             border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 10px;
-            margin-bottom: 15px;
+            font-size: 16px;
+            font-weight: 600;
+            color: #111827;
+        }
+
+        .summary-table {
+            width: 100%;
+            padding: 8px 16px;
+        }
+
+        .summary-table td {
+            padding: 12px 0;
+            vertical-align: top;
             font-size: 14px;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        .summary-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .summary-table .label {
             color: #6b7280;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            font-weight: 700;
+            font-weight: 500;
+            width: 40%;
         }
 
-        .row {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 12px;
-            font-size: 14px;
-        }
-
-        .row:last-child {
-            margin-bottom: 0;
-        }
-
-        .label {
-            color: #6b7280;
+        .summary-table .value {
+            color: #111827;
             font-weight: 500;
         }
 
-        .value {
-            color: #111827;
-            font-weight: 600;
-            text-align: right;
-        }
-
-        .negative {
+        .points {
+            font-weight: 700;
             color: #dc2626;
         }
 
-        .notes-box {
-            background-color: #fff;
-            border: 1px dashed #d1d5db;
-            padding: 15px;
-            border-radius: 4px;
-            font-size: 14px;
-            color: #4b5563;
-            line-height: 1.5;
-        }
-
-        .btn-container {
-            text-align: center;
-            margin: 30px 0;
-        }
-
-        .btn {
-            background-color: #001b70;
-            color: #ffffff !important;
-            padding: 14px 28px;
-            text-decoration: none;
+        .notes-section {
+            background-color: #f9fafb;
+            padding: 16px;
             border-radius: 6px;
-            font-weight: 700;
-            font-size: 15px;
+            border: 1px dashed #d1d5db;
+            margin: 24px 0;
+        }
+
+        .notes-section h3 {
+            margin: 0 0 10px;
+            font-size: 16px;
+            font-weight: 600;
+            color: #111827;
+        }
+
+        .notes-section p {
+            margin: 0;
+            font-size: 14px;
+            font-style: italic;
+        }
+
+        .button-container {
+            text-align: center;
+            margin: 32px 0;
+        }
+
+        .button {
             display: inline-block;
-            box-shadow: 0 2px 4px rgba(0, 27, 112, 0.3);
+            background-color: #001b70;
+            color: #ffffff;
+            padding: 14px 28px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 16px;
         }
 
-        .btn:hover {
-            background-color: #001350;
+        .separator {
+            border: none;
+            border-top: 1px solid #e5e7eb;
+            margin: 32px 0;
         }
 
-        .footer {
-            background-color: #f3f4f6;
-            padding: 20px;
+        .footer-text {
+            font-size: 14px;
+            color: #6b7280;
+            text-align: center;
+        }
+
+        .footer-text a {
+            color: #001b70;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .final-footer {
+            padding: 24px;
             text-align: center;
             font-size: 12px;
             color: #9ca3af;
         }
 
-        .footer a {
-            color: #6b7280;
-            text-decoration: underline;
+        .final-footer p {
+            margin: 0 0 5px;
         }
 
-        /* Mobile handling */
-        @media only screen and (max-width: 600px) {
-            .container {
-                width: 100% !important;
-                margin: 0 !important;
-                border-radius: 0;
-            }
-
-            .content {
-                padding: 20px;
-            }
+        .final-footer a {
+            color: #6b7280;
+            text-decoration: none;
         }
     </style>
 </head>
 
 <body>
-    <div class="container">
-        <!-- Brand Header -->
-        <div class="header">
-            <img src="https://egspgroup.in/assets/egspgoi___logo.webp" alt="EGSPGOI Logo">
-            <h1>Remark Notification</h1>
+    <div class="wrapper">
+        <div class="container">
+            <div class="header-blue-bar"></div>
+            <div class="content">
+                <img src="https://egspgroup.in/assets/egspgoi___logo.webp"
+                    alt="E.G.S. Pillay Group of Institutions Logo" class="logo">
+                <h1>Official Remark Recorded</h1>
+                <p>Dear {{facultyName}},</p>
+                <p>An official remark has been recorded on your faculty profile. A detailed PDF report is attached to
+                    this email for your reference and records.</p>
+
+                <div class="summary-card">
+                    <h2>Remark Summary</h2>
+                    <table class="summary-table" width="100%" cellpadding="0" cellspacing="0">
+                        <tr>
+                            <td class="label">Faculty Name</td>
+                            <td class="value">{{facultyName}}</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Faculty ID</td>
+                            <td class="value">{{facultyID}}</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Academic Year</td>
+                            <td class="value">{{academicYear}}</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Date Issued</td>
+                            <td class="value">{{date}}</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Issued By</td>
+                            <td class="value">{{issuerName}}</td>
+                        </tr>
+                        <tr>
+                            <td class="label">Credit Deduction</td>
+                            <td class="value points">{{remarkPoints}} Points</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="notes-section">
+                    <h3>Administrator's Notes</h3>
+                    <p>{{remarkMessage}}</p>
+                </div>
+
+                <p>If you believe this remark was issued in error, you may submit an appeal through the faculty portal
+                    within the allowed timeframe.</p>
+
+                <div class="button-container">
+                    <a href="{{portalUrl}}" class="button">View Details & Submit Appeal</a>
+                </div>
+
+                <hr class="separator">
+
+                <div class="footer-text">
+                    Having trouble? <a href="mailto:web@egspec.org">Contact our support team</a>.
+                    <p style="margin-top: 16px; font-size: 14px; color: #6b7280;">Regards,<br>The CreditWise Team</p>
+                </div>
+            </div>
         </div>
-
-        <!-- Main Content -->
-        <div class="content">
-            <p class="greeting">Hello {{facultyName}},</p>
-            <p style="color: #4b5563; line-height: 1.6;">
-                An official remark has been recorded against your faculty profile. A detailed report is attached as a
-                PDF for your records.
-            </p>
-
-            <!-- Summary Card -->
-            <div class="card">
-                <div class="card-header">Remark Summary</div>
-
-                <div class="row">
-                    <span class="label">Date Issued</span>
-                    <span class="value">{{date}}</span>
-                </div>
-                <div class="row">
-                    <span class="label">Issued By</span>
-                    <span class="value">{{issuerName}}</span>
-                </div>
-                <div class="row" style="margin-top: 15px; border-top: 1px solid #e5e7eb; padding-top: 15px;">
-                    <span class="label">Total Decrease</span>
-                    <span class="value negative">{{remarkPoints}} Credits</span>
-                </div>
-            </div>
-
-            <p style="font-weight: 500; font-size: 14px; margin-bottom: 8px;">Admin Notes:</p>
-            <div class="notes-box">
-                "{{remarkMessage}}"
-            </div>
-
-            <!-- CTA -->
-            <div class="btn-container">
-                <a href="{{portalUrl}}" class="btn">View & Appeal on Portal</a>
-            </div>
-
-            <p style="font-size: 13px; color: #6b7280; text-align: center;">
-                If you believe this is an error, you can submit an appeal directly through the faculty portal within the
-                stipulated time.
-            </p>
-        </div>
-
-        <!-- Footer -->
-        <div class="footer">
-            <p>&copy; {{currentYear}} E.G.S. Pillay Group of Institutions.</p>
+        <div class="final-footer">
+            <p>&copy; {{currentYear}} E.G.S. Pillay Group of Institutions. All rights reserved.</p>
+            <p>Nagapattinam - 611002, Tamil Nadu, India</p>
             <p>
-                <a href="#">Help Center</a> • <a href="#">Privacy Policy</a>
+                <a href="#">Help Center</a> &bull; <a href="#">Privacy Policy</a>
             </p>
-            <p>Nagapattinam - 611002, Tamil Nadu, India.</p>
+            <p><a href="_unsubscribe" class="">Unsubscribe</a></p>
         </div>
     </div>
 </body>
