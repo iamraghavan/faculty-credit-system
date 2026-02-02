@@ -18,7 +18,11 @@ const connectDB = async () => {
     },
   });
 
-  dynamoDocClient = DynamoDBDocumentClient.from(client);
+  dynamoDocClient = DynamoDBDocumentClient.from(client, {
+    marshallOptions: {
+      removeUndefinedValues: true,
+    },
+  });
 
   console.log(`✅ Connected to DynamoDB (${process.env.AWS_REGION})`);
   return dynamoDocClient;

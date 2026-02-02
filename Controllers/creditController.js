@@ -460,11 +460,14 @@ async function appealNegativeCredit(req, res, next) {
     const appealObj = {
       by: String(faculty._id),
       reason,
-      proofUrl,
-      proofMeta,
       createdAt: new Date().toISOString(),
       status: 'pending',
     };
+
+    if (proofUrl) {
+      appealObj.proofUrl = proofUrl;
+      appealObj.proofMeta = proofMeta;
+    }
 
     // update the credit in Dynamo
     await Credit.update(creditId, {
@@ -970,6 +973,14 @@ async function updateAppeal(req, res, next) {
       const { proofUrl, proofMeta } = await handleFileUpload(req.file, `appeals/${creditId}`);
       newAppeal.proofUrl = proofUrl;
       newAppeal.proofMeta = proofMeta;
+    } else {
+      // If proofUrl was undefined in original appeal and user didn't upload new one, keep as is (likely absent).
+      // If newAppeal is a shallow copy of credit.appeal, it should be fine.
+      // But verify if newAppeal has undefined values? 
+      // If credit.appeal had undefined values stored (unlikely if strictly validated), they persist.
+      // We should ideally clean newAppeal.
+      if (newAppeal.proofUrl === undefined) delete newAppeal.proofUrl;
+      if (newAppeal.proofMeta === undefined) delete newAppeal.proofMeta;
     }
 
     await Credit.update(creditId, { appeal: newAppeal, updatedAt: new Date().toISOString() });
