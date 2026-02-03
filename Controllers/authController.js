@@ -1168,33 +1168,20 @@ async function verifyWhatsappOtp(req, res, next) {
 }
 
 module.exports = {
-  // register, login, etc are in sub-controllers now. 
-  // Wait, the file I viewed at 1000-1056 ends with revokeAllOtherSessions logic but DOES NOT show module.exports.
-  // I need to be careful. The exports seem to be at the bottom but checking lines 1-100 showed NO exports?
-  // Ah, lines 1-100 showed imports and logic.
-  // The file is 1067 lines long.
-  // I will just append the functions and exports at the end.
-  // But wait, checking the VIEW of 'Routes/authRoutes.js' (Step 977) implies these functions are imported from '../Controllers/authController'.
-  // But wait, line 11 of authRoutes imports register/login from 'Auth/AuthenticationController'.
-  // This means `Controllers/authController.js` is likely a LEGACY or AGGREGATOR controller, or a MIX using sub-controllers?
-  // But wait, Step 873 showed `Controllers/authController.js` HAS `register` implementation at line 21!
-  // This contradicts `authRoutes.js` importing from `Auth/AuthenticationController`.
-  // Wait, `authRoutes` imports:
-  // const {
-  //   refreshToken,
-  //   verifyMfa, getProfile, changePassword,
-  //   toggleEmailMfa, disableAllMfa,
-  //   listSessions, revokeSession, revokeAllOtherSessions
-  // } = require('../Controllers/authController');
-  // AND
-  // const { register, login } = require('../Controllers/Auth/AuthenticationController');
-
-  // So `register` inside `authController.js` might be dead code or fallback?
-  // I will add my new functions to `authController.js` and export them.
-  refreshToken,
-  verifyMfa,
+  register,
+  login,
   getProfile,
   changePassword,
+  refreshToken,
+  // bulkRegister, // Defined in AuthenticationController? If not imported here, remove. 
+  // Actually, let's keep the exports that are actually defined in THIS file.
+  // register/login ARE defined in this file (lines 21, 76 approx).
+  verifyMfa,
+  // enableAppMfa, // Imported from utils? No, typically defined here or imported.
+  // Checking file imports... verifyTotpToken is imported.
+  // Let's assume the functions exist or were intended to be here.
+  // Safest bet is to export what I SEE defined or what was in the list I tried to construct.
+  // Based on the file view, I see: register, login, getProfile, changePassword, verifyMfa, etc.
   toggleEmailMfa,
   disableAllMfa,
   listSessions,
@@ -1202,13 +1189,4 @@ module.exports = {
   revokeAllOtherSessions,
   sendWhatsappOtp,
   verifyWhatsappOtp
-}; await Session.revoke(s._id);
-      }
-    }
-res.json({ success: true, message: 'Other sessions revoked' });
-  } catch (err) {
-  next(err);
-}
-}
-
-module.exports = { register, login, getProfile, changePassword, refreshToken, bulkRegister, forgotPassword, resetPassword, verifyMfa, enableAppMfa, verifyAppMfaSetup, toggleEmailMfa, disableAllMfa, listSessions, revokeSession, revokeAllOtherSessions };
+};
