@@ -22,6 +22,7 @@ const {
 } = require('../Controllers/creditController');
 
 const { authMiddleware, adminOnly } = require('../Middleware/authMiddleware');
+const { ensureWhatsappVerified } = require('../Middleware/whatsappMiddleware');
 const apiKeyMiddleware = require('../Middleware/apiKeyMiddleware');
 
 // Configure multer to use memory storage (serverless-safe)
@@ -42,9 +43,9 @@ const upload = multer({
  * Faculty routes
  */
 // Positive Credits
-router.post('/credits/positive', authMiddleware, upload.single('proof'), submitPositiveCredit);
-router.put('/credits/positive/:creditId', authMiddleware, upload.single('proof'), updatePositiveCredit);
-router.delete('/credits/positive/:creditId', authMiddleware, deletePositiveCredit);
+router.post('/credits/positive', authMiddleware, ensureWhatsappVerified, upload.single('proof'), submitPositiveCredit);
+router.put('/credits/positive/:creditId', authMiddleware, ensureWhatsappVerified, upload.single('proof'), updatePositiveCredit);
+router.delete('/credits/positive/:creditId', authMiddleware, ensureWhatsappVerified, deletePositiveCredit);
 
 router.get('/credits/faculty/:facultyId', authMiddleware, listCreditsForFaculty);
 
@@ -61,9 +62,9 @@ router.delete('/credits/negative/:creditId', authMiddleware, adminOnly, deleteNe
 router.get('/credits/negative', authMiddleware, getNegativeCredits);
 
 // Faculty: appeal a negative credit
-router.post('/credits/:creditId/appeal', authMiddleware, upload.single('proof'), appealNegativeCredit);
-router.put('/credits/appeals/:creditId', authMiddleware, upload.single('proof'), updateAppeal);
-router.delete('/credits/appeals/:creditId', authMiddleware, deleteAppeal);
+router.post('/credits/:creditId/appeal', authMiddleware, ensureWhatsappVerified, upload.single('proof'), appealNegativeCredit);
+router.put('/credits/appeals/:creditId', authMiddleware, ensureWhatsappVerified, upload.single('proof'), updateAppeal);
+router.delete('/credits/appeals/:creditId', authMiddleware, ensureWhatsappVerified, deleteAppeal);
 
 // Get Single Credit details
 router.get('/credits/:creditId', authMiddleware, getSingleCredit);
