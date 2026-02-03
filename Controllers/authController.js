@@ -85,6 +85,7 @@ async function register(req, res, next) {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+    // 01
 
     const newUser = await User.create(newUserPayload);
 
