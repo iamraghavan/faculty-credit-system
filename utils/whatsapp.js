@@ -1,8 +1,8 @@
 const axios = require('axios');
 
 // Default config from env or fallback to user provided defaults for now
-const WHATSAPP_API_URL = process.env.WHATSAPP_API_URL || 'https://api.tryowbot.com/sender';
-const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || '0ifvM74inCFqoFm9Hqi2Gx4taWzAY6VZLwvuo6ur7a7f4030';
+const WHATSAPP_API_URL = process.env.WHATSAPP_API_URL;
+const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 
 /**
  * Send WhatsApp Message via TryOwBot

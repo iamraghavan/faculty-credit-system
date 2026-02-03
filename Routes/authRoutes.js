@@ -5,7 +5,8 @@ const {
   refreshToken,
   verifyMfa, getProfile, changePassword,
   toggleEmailMfa, disableAllMfa,
-  listSessions, revokeSession, revokeAllOtherSessions
+  listSessions, revokeSession, revokeAllOtherSessions,
+  sendWhatsappOtp, verifyWhatsappOtp
 } = require('../Controllers/authController');
 
 const { register, login } = require('../Controllers/Auth/AuthenticationController');
