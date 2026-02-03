@@ -29,6 +29,12 @@ module.exports = {
       resetPasswordToken: data.resetPasswordToken || null,
       resetPasswordExpires: data.resetPasswordExpires || null,
 
+      // WhatsApp fields
+      whatsappNumber: data.whatsappNumber || null,
+      whatsappVerified: data.whatsappVerified ?? false,
+      whatsappOtp: null,
+      whatsappOtpExpires: null,
+
       // MFA fields
       mfaEnabled: data.mfaEnabled ?? false,
       mfaEmailEnabled: data.mfaEmailEnabled ?? false,

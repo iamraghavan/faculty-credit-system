@@ -20,12 +20,21 @@ const Session = require('../Models/Session');
  */
 async function register(req, res, next) {
   try {
-    const { name, email, password, college, department, role } = req.body;
+    const { name, email, password, college, department, role, whatsappNumber } = req.body;
     if (!name || !email || !password || !college) {
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
+
+    // Validate WhatsApp Number (if provided)
+    let validatedWhatsapp = null;
+    if (whatsappNumber) {
+      if (!/^\d{10}$/.test(whatsappNumber)) {
+        return res.status(400).json({ success: false, message: 'WhatsApp number must be exactly 10 digits' });
+      }
+      validatedWhatsapp = whatsappNumber;
+    }
 
     // Duplicate email check
     const existingUsers = await User.find({ email: normalizedEmail });
@@ -69,6 +78,8 @@ async function register(req, res, next) {
       facultyID,
       apiKey,
       role: assignedRole,
+      whatsappNumber: validatedWhatsapp,
+      whatsappVerified: false,
       currentCredit: 0,
       creditsByYear: {},
       createdAt: new Date().toISOString(),
@@ -1050,6 +1061,154 @@ async function revokeAllOtherSessions(req, res, next) {
   } catch (err) {
     next(err);
   }
+}
+
+/**
+ * Send WhatsApp Verification OTP
+ * POST /api/v1/auth/whatsapp/send-otp
+ */
+async function sendWhatsappOtp(req, res, next) {
+  try {
+    const userId = req.user.id;
+    const { phone } = req.body;
+
+    // Valid 10 digit check
+    if (phone && !/^\d{10}$/.test(phone)) {
+      return res.status(400).json({ success: false, message: 'Invalid phone number format' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    // Update phone if provided
+    let targetPhone = user.whatsappNumber;
+    if (phone) {
+      targetPhone = phone;
+      // Update user's number immediately so we verify THIS number.
+      await User.update(userId, { whatsappNumber: phone, whatsappVerified: false, updatedAt: new Date().toISOString() });
+    }
+
+    if (!targetPhone) {
+      return res.status(400).json({ success: false, message: 'No WhatsApp number found. Please provide one.' });
+    }
+
+    // Generate 6-digit OTP
+    const otp = crypto.randomInt(100000, 999999).toString();
+    const expires = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+    // Save to DB
+    await User.update(userId, {
+      whatsappOtp: otp,
+      whatsappOtpExpires: expires,
+      updatedAt: new Date().toISOString()
+    });
+
+    // Send Message
+    const { sendWhatsAppMessage } = require('../utils/whatsapp');
+
+    // Use buttonParams as tested
+    await sendWhatsAppMessage({
+      phone: '91' + targetPhone, // Append country code 91 for India
+      templateName: 'egspgoi_faculty_credit_system_otp_verify',
+      // Text params: creating, GoPay, Merchant Name, OTP, GoPay
+      textParams: ['creating', 'Faculty Portal', 'EGSPGOI', otp, 'Faculty Portal'],
+      buttonParams: [otp] // For Copy Code button
+    });
+
+    res.json({ success: true, message: `OTP sent to ${targetPhone}` });
+
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Verify WhatsApp OTP
+ * POST /api/v1/auth/whatsapp/verify-otp
+ */
+async function verifyWhatsappOtp(req, res, next) {
+  try {
+    const userId = req.user.id;
+    const { otp } = req.body;
+
+    if (!otp) return res.status(400).json({ success: false, message: 'OTP is required' });
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    if (user.whatsappVerified) {
+      return res.json({ success: true, message: 'Already verified' });
+    }
+
+    if (!user.whatsappOtp || !user.whatsappOtpExpires) {
+      return res.status(400).json({ success: false, message: 'No OTP requested' });
+    }
+
+    if (Date.now() > user.whatsappOtpExpires) {
+      return res.status(400).json({ success: false, message: 'OTP expired. Request a new one.' });
+    }
+
+    if (String(user.whatsappOtp) !== String(otp)) {
+      return res.status(400).json({ success: false, message: 'Invalid OTP' });
+    }
+
+    // Success
+    await User.update(userId, {
+      whatsappVerified: true,
+      whatsappOtp: null,
+      whatsappOtpExpires: null,
+      updatedAt: new Date().toISOString()
+    });
+
+    res.json({ success: true, message: 'WhatsApp number verified successfully' });
+
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = {
+  // register, login, etc are in sub-controllers now. 
+  // Wait, the file I viewed at 1000-1056 ends with revokeAllOtherSessions logic but DOES NOT show module.exports.
+  // I need to be careful. The exports seem to be at the bottom but checking lines 1-100 showed NO exports?
+  // Ah, lines 1-100 showed imports and logic.
+  // The file is 1067 lines long.
+  // I will just append the functions and exports at the end.
+  // But wait, checking the VIEW of 'Routes/authRoutes.js' (Step 977) implies these functions are imported from '../Controllers/authController'.
+  // But wait, line 11 of authRoutes imports register/login from 'Auth/AuthenticationController'.
+  // This means `Controllers/authController.js` is likely a LEGACY or AGGREGATOR controller, or a MIX using sub-controllers?
+  // But wait, Step 873 showed `Controllers/authController.js` HAS `register` implementation at line 21!
+  // This contradicts `authRoutes.js` importing from `Auth/AuthenticationController`.
+  // Wait, `authRoutes` imports:
+  // const {
+  //   refreshToken,
+  //   verifyMfa, getProfile, changePassword,
+  //   toggleEmailMfa, disableAllMfa,
+  //   listSessions, revokeSession, revokeAllOtherSessions
+  // } = require('../Controllers/authController');
+  // AND
+  // const { register, login } = require('../Controllers/Auth/AuthenticationController');
+
+  // So `register` inside `authController.js` might be dead code or fallback?
+  // I will add my new functions to `authController.js` and export them.
+  refreshToken,
+  verifyMfa,
+  getProfile,
+  changePassword,
+  toggleEmailMfa,
+  disableAllMfa,
+  listSessions,
+  revokeSession,
+  revokeAllOtherSessions,
+  sendWhatsappOtp,
+  verifyWhatsappOtp
+}; await Session.revoke(s._id);
+      }
+    }
+res.json({ success: true, message: 'Other sessions revoked' });
+  } catch (err) {
+  next(err);
+}
 }
 
 module.exports = { register, login, getProfile, changePassword, refreshToken, bulkRegister, forgotPassword, resetPassword, verifyMfa, enableAppMfa, verifyAppMfaSetup, toggleEmailMfa, disableAllMfa, listSessions, revokeSession, revokeAllOtherSessions };

@@ -47,11 +47,16 @@ async function updateProfile(req, res, next) {
   try {
     if (!req.user) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
-    const allowedFields = ['name', 'email', 'phone', 'department', 'prefix', 'roleCategory', 'designation'];
+    const allowedFields = ['name', 'email', 'phone', 'department', 'prefix', 'roleCategory', 'designation', 'whatsappNumber'];
     const updates = {};
 
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) updates[field] = req.body[field];
+    }
+
+    // Validate WhatsApp if updated
+    if (updates.whatsappNumber && !/^\d{10}$/.test(updates.whatsappNumber)) {
+      return res.status(400).json({ success: false, message: 'WhatsApp number must be exactly 10 digits' });
     }
 
     if (req.files?.profileImage) {
@@ -97,7 +102,7 @@ async function updateProfile(req, res, next) {
  */
 async function adminCreateUser(req, res, next) {
   try {
-    const { name, email, password, college, department, role, prefix, roleCategory, designation } = req.body;
+    const { name, email, password, college, department, role, prefix, roleCategory, designation, whatsappNumber } = req.body;
     if (!name || !email || !college || !password || !roleCategory || !designation)
       return res.status(400).json({ success: false, message: 'Missing required fields' });
 
@@ -109,6 +114,11 @@ async function adminCreateUser(req, res, next) {
     };
     const scanResult = await ddbDocClient.send(new ScanCommand(scanParams));
     if (scanResult.Count > 0) return res.status(400).json({ success: false, message: 'User already exists' });
+
+    // Validate WhatsApp
+    if (whatsappNumber && !/^\d{10}$/.test(whatsappNumber)) {
+      return res.status(400).json({ success: false, message: 'WhatsApp number must be exactly 10 digits' });
+    }
 
     const hashed = await bcrypt.hash(password, 10);
     const facultyID = generateFacultyID(college);
@@ -124,6 +134,8 @@ async function adminCreateUser(req, res, next) {
       facultyID,
       apiKey,
       prefix: prefix || 'Mr.',
+      whatsappNumber: whatsappNumber || null,
+      whatsappVerified: false,
       roleCategory,
       designation,
       role: role === 'admin' ? 'admin' : 'faculty',
@@ -177,10 +189,14 @@ async function deleteUser(req, res, next) {
  */
 async function adminUpdateUser(req, res, next) {
   try {
-    const allowedFields = ['name', 'email', 'phone', 'department', 'college', 'role', 'isActive', 'prefix', 'roleCategory', 'designation'];
+    const allowedFields = ['name', 'email', 'phone', 'department', 'college', 'role', 'isActive', 'prefix', 'roleCategory', 'designation', 'whatsappNumber', 'whatsappVerified'];
     const updates = {};
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) updates[field] = req.body[field];
+    }
+
+    if (updates.whatsappNumber && !/^\d{10}$/.test(updates.whatsappNumber)) {
+      return res.status(400).json({ success: false, message: 'WhatsApp number must be exactly 10 digits' });
     }
 
     if (req.files?.profileImage) {

@@ -61,6 +61,8 @@ async function register(req, res, next) {
         id: newUser._id,
         name: newUser.name,
         role: newUser.role,
+        whatsappNumber: newUser.whatsappNumber,
+        whatsappVerified: newUser.whatsappVerified,
         token
       }
     });
@@ -120,6 +122,8 @@ async function login(req, res, next) {
         id: user._id,
         name: user.name,
         role: user.role,
+        whatsappNumber: user.whatsappNumber,
+        whatsappVerified: user.whatsappVerified,
         token
       }
     });
