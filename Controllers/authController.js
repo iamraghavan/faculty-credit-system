@@ -932,48 +932,17 @@ async function getProfile(req, res, next) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    // Select only the fields you want to return
-    const {
-      _id,
-      name,
-      prefix,
-      email,
-      role,
-      isActive,
-      department,
-      facultyID,
-      college,
-      currentCredit,
-      creditsByYear,
-      mfaEnabled,
-      mfaEmailEnabled,
-      mfaAppEnabled,
-      createdAt,
-      updatedAt,
-      apiKey,
-    } = user;
+    // Remove password from user object if it exists (DynamoDB items are plain objects)
+    const userObj = { ...user };
+    delete userObj.password;
+
+    // Fetch sessions
+    const sessions = await Session.findByUserId(userId);
 
     res.json({
       success: true,
-      user: {
-        _id,
-        name,
-        prefix,
-        email,
-        role,
-        isActive,
-        department,
-        facultyID,
-        college,
-        currentCredit,
-        creditsByYear,
-        mfaEnabled,
-        mfaEmailEnabled,
-        mfaAppEnabled,
-        createdAt,
-        updatedAt,
-        apiKey,
-      },
+      user: userObj,
+      sessions,
     });
   } catch (err) {
     next(err);
