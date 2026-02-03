@@ -122,8 +122,8 @@ async function login(req, res, next) {
         id: user._id,
         name: user.name,
         role: user.role,
-        whatsappNumber: user.whatsappNumber,
-        whatsappVerified: user.whatsappVerified,
+        whatsappNumber: user.whatsappNumber || null,
+        whatsappVerified: user.whatsappVerified ?? false,
         token
       }
     });
