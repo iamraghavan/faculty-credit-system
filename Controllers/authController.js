@@ -1070,7 +1070,7 @@ async function revokeAllOtherSessions(req, res, next) {
  */
 async function sendWhatsappOtp(req, res, next) {
   try {
-    const userId = req.user.id;
+    const userId = String(req.user.id || req.user._id);
     const { phone } = req.body;
 
     // Valid 10 digit check
@@ -1129,7 +1129,7 @@ async function sendWhatsappOtp(req, res, next) {
  */
 async function verifyWhatsappOtp(req, res, next) {
   try {
-    const userId = req.user.id;
+    const userId = String(req.user.id || req.user._id);
     const { otp } = req.body;
 
     if (!otp) return res.status(400).json({ success: false, message: 'OTP is required' });
