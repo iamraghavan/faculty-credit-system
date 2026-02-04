@@ -26,6 +26,8 @@ async function ensureDb() {
   }
 }
 
+const { createMaskedUrl, createShortLink } = require('../utils/urlHelper');
+
 /**
  * Helper: handle GitHub file upload and return proofUrl & proofMeta
  */
@@ -39,7 +41,6 @@ async function handleFileUpload(file, folder) {
   const destPath = `${folder}/${Date.now()}_${safeName}`;
 
   if (!process.env.GITHUB_TOKEN || !process.env.ASSET_GH_REPO || !process.env.ASSET_GH_OWNER) {
-    // if there's a tmpPath on disk, attempt to remove it
     if (tmpPath) {
       try { fs.unlinkSync(tmpPath); } catch (e) { /* ignore */ }
     }
@@ -47,39 +48,44 @@ async function handleFileUpload(file, folder) {
   }
 
   try {
-    let proofUrl;
+    let rawProofUrl;
     if (hasBuffer) {
-      // Use your buffer-based uploader
-      // uploadFileToGitHubBuffer(buffer, destPath, filename?) — adapt signature if needed
-      proofUrl = await uploadFileToGitHubBuffer(file.buffer, destPath, safeName);
+      rawProofUrl = await uploadFileToGitHubBuffer(file.buffer, destPath, safeName);
     } else if (tmpPath) {
-      // Disk-based path present
-      proofUrl = await uploadFileToGitHub(tmpPath, destPath);
+      rawProofUrl = await uploadFileToGitHub(tmpPath, destPath);
     } else {
-      // Neither buffer nor path — defensive error
       throw new Error('Uploaded file has no buffer or path.');
     }
 
-    // Try to clean up tmpPath if it exists
+    // Cleanup local file
     if (tmpPath) {
       try { fs.unlinkSync(tmpPath); } catch (e) { /* ignore cleanup errors */ }
     }
 
+    // --- NEW: Generate Friendly URLs ---
+    const mimeType = file.mimetype || 'application/octet-stream';
+
+    // 1. Create Masked CDN URL (e.g. /cdn/assets/v1/1234abc)
+    const maskedUrl = await createMaskedUrl(rawProofUrl, mimeType);
+
+    // 2. Create Short URL (e.g. /s/xy9az) pointing to the Masked URL (or raw, but masked is better for branding)
+    const shortUrl = await createShortLink(maskedUrl);
+
     return {
-      proofUrl,
+      proofUrl: maskedUrl, // Use masked URL as the primary proof URL
       proofMeta: {
         originalName,
         size: file.size || (file.buffer ? file.buffer.length : undefined),
-        mimeType: file.mimetype,
+        mimeType,
         destPath,
+        rawUrl: rawProofUrl, // Keep raw URL in meta just in case
+        shortUrl: shortUrl   // Store short URL in meta
       },
     };
   } catch (err) {
-    // Attempt cleanup if disk file was created
     if (tmpPath) {
       try { fs.unlinkSync(tmpPath); } catch (e) { /* ignore */ }
     }
-    // Re-throw with a clear message (controller logs it)
     throw new Error('Failed to upload file to GitHub: ' + (err && err.message ? err.message : String(err)));
   }
 }
