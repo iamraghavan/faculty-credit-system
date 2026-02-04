@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { recalcFacultyCredits } = require('../utils/calculateCredits');
-const { uploadFileToGitHub , uploadFileToGitHubBuffer} = require('../utils/githubUpload');
+const { handleFileUpload } = require('../utils/fileUpload');
 const { connectDB } = require('../config/db');
 const { sendEmail } = require('../utils/email');
 
@@ -33,61 +33,7 @@ const emitSocket = (req, event, payload) => {
   }
 };
 
-/**
- * Helper: handle GitHub file upload and return proofUrl & proofMeta
- */
-async function handleFileUpload(file, folder) {
-  if (!file) return {};
 
-  // prefer a sanitized filename, but handle both memory & disk multer storages
-  const originalName = file.originalname || 'upload';
-  const safeName = path.basename(originalName).replace(/[^\w.\-() ]+/g, '_').slice(0, 200);
-  const destPath = `${folder}/${Date.now()}_${safeName}`;
-
-  // If using memoryStorage, multer provides file.buffer
-  const isBuffer = Buffer.isBuffer(file.buffer);
-  const tmpPath = file.path; // may be undefined if memoryStorage is used
-
-  if (!process.env.GITHUB_TOKEN || !process.env.ASSET_GH_REPO || !process.env.ASSET_GH_OWNER) {
-    // try to cleanup only if there's a real tmpPath on disk
-    if (tmpPath && typeof tmpPath === 'string') {
-      try { fs.unlinkSync(tmpPath); } catch (e) { /* ignore */ }
-    }
-    throw new Error('GitHub upload not configured. Set ASSET_GH_OWNER, ASSET_GH_REPO, and GITHUB_TOKEN.');
-  }
-
-  try {
-    let proofUrl;
-    if (isBuffer) {
-      // Use buffer upload helper (does not require a disk path)
-      proofUrl = await uploadFileToGitHubBuffer(file.buffer, destPath);
-    } else if (tmpPath && typeof tmpPath === 'string') {
-      // Disk-based multer -> upload by path
-      proofUrl = await uploadFileToGitHub(tmpPath, destPath);
-      // cleanup the temporary file after upload
-      try { fs.unlinkSync(tmpPath); } catch (e) { /* ignore */ }
-    } else {
-      // Neither buffer nor tmp path -> maybe client didn't send file correctly
-      throw new Error('Uploaded file missing buffer and path (multer storage mismatch).');
-    }
-
-    return {
-      proofUrl,
-      proofMeta: {
-        originalName,
-        size: file.size || (file.buffer ? file.buffer.length : undefined),
-        mimeType: file.mimetype,
-      },
-    };
-  } catch (err) {
-    // cleanup only if we have a tmpPath
-    if (tmpPath && typeof tmpPath === 'string') {
-      try { fs.unlinkSync(tmpPath); } catch (e) { /* ignore */ }
-    }
-    // rethrow with clearer message
-    throw new Error('Failed to upload file to GitHub: ' + (err && err.message ? err.message : String(err)));
-  }
-}
 
 /**
  * Admin creates credit title (Dynamo)
@@ -788,30 +734,30 @@ async function adminListNegativeCredits(req, res, next) {
     // 9️⃣ Enrich results with related info
     // (Optional: can fetch faculty/title info dynamically)
     const formattedItems = paged.map(it => ({
-  creditId: it._id,
-  // 🧑‍🏫 Faculty details
-  facultyName: it.facultySnapshot?.name || '',
-  facultyID: it.facultySnapshot?.facultyID || '',
-  college: it.facultySnapshot?.college || '',
-  department: it.facultySnapshot?.department || '',
+      creditId: it._id,
+      // 🧑‍🏫 Faculty details
+      facultyName: it.facultySnapshot?.name || '',
+      facultyID: it.facultySnapshot?.facultyID || '',
+      college: it.facultySnapshot?.college || '',
+      department: it.facultySnapshot?.department || '',
 
-  // 🧾 Credit info
-  templateTitle: it.creditTitle || '',
-  title: it.title || '',
-  type: it.type || '',
-  points: it.points || 0,
-  status: it.status || '',
-  issuedBy: it.issuedBy || '',
-  proofMeta: it.proofMeta || null,
-  proofUrl: it.proofUrl || '',
+      // 🧾 Credit info
+      templateTitle: it.creditTitle || '',
+      title: it.title || '',
+      type: it.type || '',
+      points: it.points || 0,
+      status: it.status || '',
+      issuedBy: it.issuedBy || '',
+      proofMeta: it.proofMeta || null,
+      proofUrl: it.proofUrl || '',
 
-  // 📅 Timestamps
-  createdAt: it.createdAt,
-  updatedAt: it.updatedAt,
+      // 📅 Timestamps
+      createdAt: it.createdAt,
+      updatedAt: it.updatedAt,
 
-  // keep all original fields if frontend still needs them
-  ...it
-}));
+      // keep all original fields if frontend still needs them
+      ...it
+    }));
     // 🔹 Optional: Distinct filter options for frontend dropdowns
     const distinctValues = {
       templates: [...new Set(items.map(i => i.creditTitle).filter(Boolean))],
@@ -1237,8 +1183,8 @@ async function oaGetOwnIssuedCredits(req, res, next) {
       if (v === undefined || v === null) return null;
       if (typeof v === 'boolean') return v;
       const s = String(v).toLowerCase();
-      if (['1','true','yes','y'].includes(s)) return true;
-      if (['0','false','no','n'].includes(s)) return false;
+      if (['1', 'true', 'yes', 'y'].includes(s)) return true;
+      if (['0', 'false', 'no', 'n'].includes(s)) return false;
       return null;
     };
 

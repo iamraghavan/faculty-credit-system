@@ -3,7 +3,8 @@ const ShortUrl = require('../Models/ShortUrl');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 
-const APP_URL = process.env.APP_URL || 'https://fcs.egspgroup.in';
+// Prioritize APP_URL, fallback to FRONTEND_URL, remove trailing slash
+const APP_URL = (process.env.APP_URL || process.env.FRONTEND_URL || 'https://fcs.egspgroup.in').replace(/\/$/, '');
 
 /**
  * Generate a Masked CDN URL
