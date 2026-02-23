@@ -6,14 +6,14 @@ self.addEventListener('push', function (event) {
     try {
         data = event.data.json();
     } catch (e) {
-        data = { title: 'Default Title', body: event.data.text() };
+        data = { title: 'Faculty Credit System - FCS - CreditWise - Notification', body: event.data.text() };
     }
 
     const title = data.title || 'Notification';
     const options = {
         body: data.body || 'No body content.',
-        icon: data.icon || 'https://via.placeholder.com/128',
-        badge: 'https://via.placeholder.com/64',
+        icon: data.icon || 'https://fcs.egspgroup.in/favicon.ico',
+        badge: 'https://fcs.egspgroup.in/favicon.ico',
         data: { url: data.url || '/' }
     };
 
