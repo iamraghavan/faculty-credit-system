@@ -104,8 +104,7 @@ async function issuePositiveCredit(req, res, next) {
     // File upload
     let proofUrl, proofMeta;
     if (req.file) {
-      const { handleFileUpload: uploadHelper } = require('../../Controllers/creditController'); // Use existing helper
-      const uploadResult = await uploadHelper(req.file, `credits/positive/${academicYear}`);
+      const uploadResult = await handleFileUpload(req.file, `credits/positive/${academicYear}`);
       proofUrl = uploadResult.proofUrl;
       proofMeta = uploadResult.proofMeta;
     }

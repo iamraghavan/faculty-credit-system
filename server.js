@@ -53,6 +53,11 @@ app.get(['/', '/login'], (req, res) => {
 });
 
 // API routes
+// Shortener Redirect at root
+const cdnController = require('./Controllers/cdnController');
+app.get('/s/:id', cdnController.getShortUrl);
+
+// API routes
 app.get('/health', (req, res) =>
   res.status(200).json({ status: 'ok', uptime: process.uptime() })
 );
@@ -67,23 +72,18 @@ app.use('/api/v1/analytics', analyticsRouter);
 
 // CDN & Shortener Routes
 const cdnRoutes = require('./Routes/cdnRoutes');
-// Mount asset routes at /cdn
 app.use('/cdn', cdnRoutes);
-
-// Mount shortener redirect at /s (e.g. /s/xyz)
-const cdnController = require('./Controllers/cdnController');
-app.get('/s/:id', cdnController.getShortUrl);
-// Mount shortener creation API (if strictly API, usually /api/v1/url/shorten, but we can reuse cdnRoutes or add specific one)
-// For simplicity, reusing the route definition for creation inside /cdn or /api
 app.use('/api/v1/url', cdnRoutes);
 
-
-// Serve Scholarship Booklet PDF
-app.get('/api/v1/scholarship-booklet', (req, res) => {
-  const pdfPath = require('path').join(__dirname, 'EGSPGOI-Scholarship-information-booklet_v1.pdf');
-  res.sendFile(pdfPath);
+// Catch-all 404 for debugging
+app.use((req, res) => {
+  console.log(`Unmatched route: ${req.method} ${req.url}`);
+  res.status(404).json({
+    success: false,
+    message: `Route not found on Backend: ${req.method} ${req.url}`,
+    hint: "If you are seeing this, the request REACHED the backend but didn't match any route."
+  });
 });
-
 
 // Error handling middleware
 app.use(errorHandler);
