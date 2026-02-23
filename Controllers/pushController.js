@@ -5,6 +5,8 @@ const fsPromises = fs.promises;
 const PushSubscription = require('../Models/PushSubscription');
 const { sendEmail } = require('../utils/email');
 const { generateRemarkPdf } = require('../utils/pdfGenerator');
+const { sendFcmNotification } = require('../utils/firebase');
+const User = require('../Models/User');
 require('dotenv').config();
 
 // Configure web-push
@@ -69,8 +71,41 @@ async function sendPushToUser(userId, payload) {
         });
 
         await Promise.all(promises);
+
+        // 2. Send via FCM (Firebase)
+        const user = await User.findById(userId);
+        if (user && user.fcmToken) {
+            await sendFcmNotification(user.fcmToken, {
+                title: payload.title,
+                body: payload.body,
+                url: payload.url,
+                icon: payload.icon,
+                data: payload.data
+            });
+        }
     } catch (err) {
         console.error('Failed to send push batch:', err);
+    }
+}
+
+/**
+ * Update FCM device token for the current user
+ * PUT /api/v1/users/device-token
+ */
+async function updateDeviceToken(req, res, next) {
+    try {
+        const { fcmToken } = req.body;
+        const user = req.user;
+
+        if (!fcmToken) {
+            return res.status(400).json({ success: false, message: 'fcmToken is required' });
+        }
+
+        await User.update(String(user._id), { fcmToken });
+
+        res.status(200).json({ success: true, message: 'Device token updated successfully' });
+    } catch (err) {
+        next(err);
     }
 }
 

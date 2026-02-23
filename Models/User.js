@@ -43,6 +43,9 @@ module.exports = {
       mfaCode: data.mfaCode || null,
       mfaCodeExpires: data.mfaCodeExpires || null,
 
+      // Firebase / Push Notification
+      fcmToken: data.fcmToken || null,
+
       ...data,
     };
 

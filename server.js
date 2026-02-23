@@ -47,6 +47,37 @@ app.use(rateLimitMiddleware);
 // Serve static files from 'public' directory
 app.use(express.static('public'));
 
+// Dynamic Service Worker to avoid exposing hardcoded keys
+app.get('/firebase-messaging-sw.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript');
+  res.send(`
+    importScripts('https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js');
+    importScripts('https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js');
+
+    firebase.initializeApp({
+      apiKey: "${process.env.GCP_API_KEY}",
+      authDomain: "${process.env.FIREBASE_AUTH_DOMAIN}",
+      projectId: "${process.env.FIREBASE_PROJECT_ID}",
+      storageBucket: "${process.env.FIREBASE_STORAGE_BUCKET}",
+      messagingSenderId: "${process.env.FIREBASE_MESSAGING_SENDER_ID}",
+      appId: "${process.env.FIREBASE_APP_ID}"
+    });
+
+    const messaging = firebase.messaging();
+
+    messaging.onBackgroundMessage((payload) => {
+      const notificationTitle = payload.notification.title;
+      const notificationOptions = {
+        body: payload.notification.body,
+        icon: '/favicon.ico',
+        badge: '/favicon.ico',
+        data: payload.data
+      };
+      self.registration.showNotification(notificationTitle, notificationOptions);
+    });
+  `);
+});
+
 // Redirect root and /login routes
 app.get(['/', '/login'], (req, res) => {
   res.redirect('https://fcs.egspgroup.in/u/portal/auth?faculty_login');
