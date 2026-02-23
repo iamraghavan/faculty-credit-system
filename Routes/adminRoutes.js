@@ -30,7 +30,8 @@ const {
 } = require('../Controllers/Admin/CreditListController');
 
 const {
-  issueNegativeCredit
+  issueNegativeCredit,
+  issuePositiveCredit
 } = require('../Controllers/Admin/CreditManageController');
 
 
@@ -65,6 +66,7 @@ router.delete('/credit-title/:id', authMiddleware, adminOnly, deleteCreditTitle)
 router.get('/credits/positive', authMiddleware, adminOnly, listPositiveCreditsForAdmin);
 router.get('/credits/positive/:id', authMiddleware, adminOnly, getPositiveCreditById);
 router.put('/credits/positive/:id/status', authMiddleware, adminOnly, updatePositiveCreditStatus);
+router.post('/credits/positive', authMiddleware, adminOrOA, upload.single('proof'), issuePositiveCredit);
 
 /**
  * Negative credits issued by admin to faculty

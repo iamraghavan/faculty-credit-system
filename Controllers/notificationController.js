@@ -137,7 +137,7 @@ async function sendRemarkNotification(req, res, next) {
 
         await sendWhatsAppMessage({
           phone: faculty.whatsappNumber,
-          templateName: 'fcs_negative_credit_alert_v1',
+          templateName: 'fcs_negative_credit_alert_v1_m',
           language: 'en',
           textParams: [
             faculty.name,           // {{faculty_name}}

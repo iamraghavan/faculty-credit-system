@@ -209,7 +209,7 @@ async function adminIssueNegativeCredit(req, res, next) {
 
         await sendWhatsAppMessage({
           phone: faculty.whatsappNumber,
-          templateName: 'fcs_negative_credit_alert_v1',
+          templateName: 'fcs_negative_credit_alert_v1_m',
           language: 'en',
           textParams: [
             faculty.name,           // {{faculty_name}}
@@ -449,8 +449,31 @@ async function appealNegativeCredit(req, res, next) {
     // fetch updated credit to return
     const updated = await Credit.findById(creditId);
 
-    // Optionally emit socket
-    io.emit(`faculty:${faculty._id}:creditUpdate`, updated);
+    // 4. Send WhatsApp Notification
+    if (faculty.whatsappNumber) {
+      try {
+        await sendWhatsAppMessage({
+          phone: faculty.whatsappNumber,
+          templateName: 'fcs_appeal_submission_alert_v1',
+          language: 'en',
+          textParams: [
+            faculty.name,           // {{1}} name
+            faculty.facultyID,      // {{2}} ID
+            faculty.department,     // {{3}} Dept
+            creditId,               // {{4}} Ticket ID
+            credit.title || 'Negative Credit', // {{5}} Activity
+            Math.abs(credit.points || 0).toString(), // {{6}} Penalty
+            reason                  // {{7}} Notes
+          ],
+          buttonParams: [
+            creditId                // {{1}} button ID
+          ]
+        });
+        console.log('Appeal WhatsApp notification sent to:', faculty.whatsappNumber);
+      } catch (waErr) {
+        console.error('Appeal WhatsApp notification failed:', waErr);
+      }
+    }
 
     return res.json({ success: true, message: 'Appeal submitted successfully', data: updated });
   } catch (err) {
