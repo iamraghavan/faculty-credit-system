@@ -62,8 +62,9 @@ async function register(req, res, next) {
         id: newUser._id,
         name: newUser.name,
         role: newUser.role,
-        whatsappNumber: newUser.whatsappNumber,
-        whatsappVerified: newUser.whatsappVerified,
+        fcmToken: newUser.fcmToken || null,
+        whatsappNumber: newUser.whatsappNumber || null,
+        whatsappVerified: newUser.whatsappVerified || false,
         token
       }
     });
@@ -91,31 +92,31 @@ async function login(req, res, next) {
     if (!match) return res.status(401).json({ success: false, message: 'Invalid credentials' });
 
     // MFA Logic
+    const targetUserId = user._id || user.id;
+
     if (user.mfaEnabled) {
-      // App MFA
       if (user.mfaAppEnabled) {
         if (!mfaToken) {
-          return res.json({ success: true, mfaRequired: true, mfaType: 'app', userId: user._id });
+          return res.json({ success: true, mfaRequired: true, mfaType: 'app', userId: targetUserId });
         }
         const valid = verifyTotpToken(user.mfaSecret, mfaToken);
         if (!valid) return res.status(400).json({ success: false, message: 'Invalid MFA code' });
       }
-      // Email MFA
       else if (user.mfaEmailEnabled) {
-        // Send code logic...
         const code = generateMfaCode();
-        await User.update(user._id, { mfaCode: code, mfaCodeExpires: Date.now() + 300000 });
+        await User.update(targetUserId, { mfaCode: code, mfaCodeExpires: Date.now() + 300000 });
         await sendMfaEmail(user, code);
-        return res.json({ success: true, mfaRequired: true, mfaType: 'email', userId: user._id });
+        return res.json({ success: true, mfaRequired: true, mfaType: 'email', userId: targetUserId });
       }
     }
 
     if (fcmToken) {
-      await User.update(user._id, { fcmToken });
+      await User.update(targetUserId, { fcmToken });
+      user.fcmToken = fcmToken;
     }
 
     const token = jwt.sign(
-      { id: user._id, role: user.role },
+      { id: targetUserId, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
     );
@@ -124,9 +125,10 @@ async function login(req, res, next) {
       success: true,
       mfaRequired: false,
       data: {
-        id: user._id,
+        id: targetUserId,
         name: user.name,
         role: user.role,
+        fcmToken: user.fcmToken || null,
         whatsappNumber: user.whatsappNumber || null,
         whatsappVerified: user.whatsappVerified ?? false,
         token

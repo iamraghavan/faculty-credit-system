@@ -26,14 +26,32 @@ async function getProfile(req, res, next) {
       return res.status(401).json({ success: false, message: 'Unauthorized' });
     }
 
+    const userId = String(req.user._id || req.user.id);
     const params = {
       TableName: TABLE_NAME,
-      // Use the same key attribute as defined in your DynamoDB schema (likely "_id")
-      Key: { _id: String(req.user._id || req.user.id) },
+      Key: { _id: userId },
     };
 
     const result = await ddbDocClient.send(new GetCommand(params));
-    res.json({ success: true, data: result.Item || null });
+    
+    // Fallback for users with 'id' as key instead of '_id'
+    if (!result.Item) {
+      const fallbackParams = {
+        TableName: TABLE_NAME,
+        Key: { id: userId },
+      };
+      const fallbackResult = await ddbDocClient.send(new GetCommand(fallbackParams));
+      if (fallbackResult.Item) {
+        result.Item = fallbackResult.Item;
+      }
+    }
+
+    if (!result.Item) {
+       return res.status(404).json({ success: false, message: 'User profile not found' });
+    }
+
+    delete result.Item.password;
+    res.json({ success: true, data: result.Item });
   } catch (err) {
     next(err);
   }
