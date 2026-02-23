@@ -25,6 +25,7 @@ async function sendRemarkNotification(req, res, next) {
     // Support both flattened and nested structures to be safe
     const title = req.body.title || (req.body.remark && req.body.remark.title);
     const academicYear = req.body.academicYear || new Date().getFullYear();
+    const points = req.body.points || (req.body.remark && req.body.remark.points) || 0;
     const message = req.body.notes || req.body.message || (req.body.remark && req.body.remark.message);
 
     const issuerName = (req.user && req.user.name) ? req.user.name : 'Administrator';
