@@ -7,6 +7,8 @@ const User = require('../Models/User'); // your DynamoDB-based User model
 const { sendEmail } = require('../utils/email');
 const { generateRemarkPdf } = require('../utils/pdfGenerator');
 const { sendPushToUser } = require('./pushController');
+const { recalcFacultyCredits } = require('../utils/calculateCredits');
+const { sendWhatsAppMessage } = require('../utils/whatsapp');
 require('dotenv').config();
 
 const TEMPLATE_DIR = path.join(__dirname, '..', 'email-templates');
@@ -22,11 +24,10 @@ async function sendRemarkNotification(req, res, next) {
     const { facultyId } = req.body;
     // Support both flattened and nested structures to be safe
     const title = req.body.title || (req.body.remark && req.body.remark.title);
-    const message = req.body.notes || req.body.message || (req.body.remark && req.body.remark.message);
-    const points = req.body.points || (req.body.remark && req.body.remark.points) || 0;
     const academicYear = req.body.academicYear || new Date().getFullYear();
+    const message = req.body.notes || req.body.message || (req.body.remark && req.body.remark.message);
 
-    const issuedBy = (req.user && req.user.name) ? req.user.name : 'Administrator';
+    const issuerName = (req.user && req.user.name) ? req.user.name : 'Administrator';
 
     if (!facultyId || !title) {
       return res.status(400).json({ success: false, message: 'Missing facultyId or title' });
@@ -82,7 +83,7 @@ async function sendRemarkNotification(req, res, next) {
       .replace(/{{\s*remarkPoints\s*}}/g, Math.abs(pointsValue))
       .replace(/{{\s*remarkMessage\s*}}/g, message || 'No notes provided.')
       .replace(/{{\s*date\s*}}/g, dateStr)
-      .replace(/{{\s*issuerName\s*}}/g, issuedBy)
+      .replace(/{{\s*issuerName\s*}}/g, issuerName)
       .replace(/{{\s*portalUrl\s*}}/g, portalUrl)
       .replace(/{{\s*currentYear\s*}}/g, new Date().getFullYear());
 
@@ -127,7 +128,37 @@ async function sendRemarkNotification(req, res, next) {
       console.error('Push failed:', pushErr);
     }
 
-    return res.json({ success: true, message: 'Notification processed (Email + Push)' });
+    // 6. Send WhatsApp Notification
+    if (faculty.whatsappNumber) {
+      try {
+        const recalcResult = await recalcFacultyCredits(faculty._id);
+        const currentBalance = recalcResult.currentCredit;
+
+        await sendWhatsAppMessage({
+          phone: faculty.whatsappNumber,
+          templateName: 'fcs_negative_credit_alert_v1',
+          language: 'en',
+          textParams: [
+            faculty.name,           // {{faculty_name}}
+            Math.abs(pointsValue).toString(), // {{neg_credits}}
+            faculty.facultyID,      // {{faculty_id}}
+            faculty.department,     // {{dept}}
+            title,                  // {{activity}}
+            issuerName,             // {{issuer}}
+            message || 'No reason specified', // {{reason}}
+            currentBalance.toString() // {{credit_balance}}
+          ],
+          buttonParams: [
+            String(faculty._id) // For the dynamic URL id={{1}}
+          ]
+        });
+        console.log('WhatsApp notification sent to:', faculty.whatsappNumber);
+      } catch (waErr) {
+        console.error('WhatsApp failed:', waErr);
+      }
+    }
+
+    return res.json({ success: true, message: 'Notification processed (Email + Push + WhatsApp)' });
 
   } catch (err) {
     console.error('sendRemarkNotification error:', err);
