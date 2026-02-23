@@ -7,6 +7,7 @@ const { handleFileUpload } = require('../../utils/fileUpload');
 const { schemas } = require('../../utils/validation');
 const fs = require('fs');
 const path = require('path');
+const { sendPushToUser } = require('../pushController');
 
 
 
@@ -69,6 +70,14 @@ async function issueNegativeCredit(req, res, next) {
     // Assuming 'io' is attached to app.locals or req
     const io = req.app?.locals?.io;
     if (io) io.emit('credit:negative:new', { facultyId: String(faculty._id), credit: creditItem });
+
+    // 2. Send Push Notification
+    sendPushToUser(String(faculty._id), {
+      title: 'Alert: Negative Credit Received',
+      body: `A negative credit of ${Math.abs(creditItem.points)} has been issued: ${creditItem.title}.`,
+      url: '/u/credits',
+      icon: '/icons/warning.png'
+    });
 
     return res.status(201).json({ success: true, data: creditItem });
   } catch (err) {
@@ -138,6 +147,14 @@ async function issuePositiveCredit(req, res, next) {
     // Socket emit
     const io = req.app?.locals?.io;
     if (io) io.emit(`faculty:${faculty._id}:creditUpdate`, creditItem);
+
+    // 2. Send Push Notification
+    sendPushToUser(String(faculty._id), {
+      title: 'Success: Credits Awarded!',
+      body: `You have been awarded ${creditItem.points} positive credits: ${creditItem.title}.`,
+      url: '/u/credits',
+      icon: '/icons/success.png'
+    });
 
     return res.status(201).json({ success: true, message: 'Positive credit issued and approved', data: creditItem });
   } catch (err) {

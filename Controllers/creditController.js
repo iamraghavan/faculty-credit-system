@@ -89,6 +89,14 @@ async function submitPositiveCredit(req, res, next) {
     try { await recalcFacultyCredits(faculty._id); } catch (e) { /* log but continue */ }
     io.emit(`faculty:${faculty._id}:creditUpdate`, creditDoc);
 
+    // 2. Send Push Notification Confirmation
+    sendPushToUser(String(faculty._id), {
+      title: 'Credit Submitted',
+      body: `Your credit submission "${title}" for ${points} points is now pending approval.`,
+      url: '/u/credits',
+      icon: '/icons/info.png'
+    });
+
     return res.status(201).json({ success: true, data: creditDoc });
   } catch (err) {
     next(err);
