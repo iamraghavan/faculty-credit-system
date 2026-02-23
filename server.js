@@ -66,14 +66,17 @@ app.get('/firebase-messaging-sw.js', (req, res) => {
     const messaging = firebase.messaging();
 
     messaging.onBackgroundMessage((payload) => {
-      const notificationTitle = payload.notification.title;
+      console.log('[firebase-messaging-sw.js] Received background message ', payload);
+      
+      const notificationTitle = payload.notification?.title || 'New Notification';
       const notificationOptions = {
-        body: payload.notification.body,
-        icon: '/favicon.ico',
-        badge: '/favicon.ico',
-        data: payload.data
+        body: payload.notification?.body || 'You have a new message from FCS.',
+        icon: payload.notification?.icon || '/favicon.ico',
+        badge: payload.notification?.icon || '/favicon.ico',
+        data: payload.data || {}
       };
-      self.registration.showNotification(notificationTitle, notificationOptions);
+
+      return self.registration.showNotification(notificationTitle, notificationOptions);
     });
   `);
 });
