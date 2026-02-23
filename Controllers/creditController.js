@@ -13,6 +13,7 @@ const { sendPushToUser } = require('../Controllers/pushController');
 const { recalcFacultyCredits } = require('../utils/calculateCredits');
 const io = require('../socket');
 const { connectDB } = require('../config/db');
+const { sendWhatsAppMessage } = require('../utils/whatsapp');
 
 /**
  * Helper: ensure DynamoDB client is connected
@@ -263,6 +264,31 @@ async function adminIssueNegativeCredit(req, res, next) {
         url: portalUrl,
         icon: '/icons/warning.png' // Ensure this exists on frontend public
       });
+
+      // 6. Send WhatsApp Notification
+      if (faculty.whatsappNumber) {
+        const recalcResult = await recalcFacultyCredits(faculty._id);
+        const currentBalance = recalcResult.currentCredit;
+
+        await sendWhatsAppMessage({
+          phone: faculty.whatsappNumber,
+          templateName: 'fcs_negative_credit_alert_v1',
+          language: 'en',
+          textParams: [
+            faculty.name,           // {{faculty_name}}
+            Math.abs(pointsValue).toString(), // {{neg_credits}}
+            faculty.facultyID,      // {{faculty_id}}
+            faculty.department,     // {{dept}}
+            ct.title,               // {{activity}}
+            issuerName,             // {{issuer}}
+            notes || 'No reason specified', // {{reason}}
+            currentBalance.toString() // {{credit_balance}}
+          ],
+          buttonParams: [
+            String(faculty._id) // For the dynamic URL id={{1}}
+          ]
+        });
+      }
 
     } catch (notifyErr) {
       console.error('Failed to send remark notification:', notifyErr);
