@@ -39,14 +39,16 @@ const schemas = {
       password: Joi.string().min(6).required(),
       college: Joi.string().required(),
       department: Joi.string().optional(),
-      role: Joi.string().valid('admin', 'faculty', 'oa').optional()
+      role: Joi.string().valid('admin', 'faculty', 'oa').optional(),
+      fcmToken: Joi.string().allow(null, '').optional()
     }),
     login: Joi.object({
       email: Joi.string().email().required(),
       password: Joi.string().required(),
       mfaToken: Joi.string().optional(), // Specific for MFA
       token: Joi.string().optional(),    // Legacy/Generic
-      turnstileToken: Joi.string().optional() // Cloudflare Turnstile
+      turnstileToken: Joi.string().optional(), // Cloudflare Turnstile
+      fcmToken: Joi.string().allow(null, '').optional()
     })
   }
 };

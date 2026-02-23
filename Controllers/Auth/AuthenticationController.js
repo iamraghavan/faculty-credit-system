@@ -13,7 +13,7 @@ async function register(req, res, next) {
     const { error, value } = schemas.auth.register.validate(req.body);
     if (error) return res.status(400).json({ success: false, message: error.details[0].message });
 
-    const { name, email, password, college, department, role } = value;
+    const { name, email, password, college, department, role, fcmToken } = value;
     const normalizedEmail = email.trim().toLowerCase();
 
     // Check Duplicate
@@ -43,6 +43,7 @@ async function register(req, res, next) {
       facultyID: generateFacultyID(college),
       apiKey: generateApiKey(),
       role: assignedRole,
+      fcmToken: fcmToken || null,
       currentCredit: 0,
       creditsByYear: {},
       createdAt: new Date().toISOString(),
@@ -80,7 +81,7 @@ async function login(req, res, next) {
     const { error, value } = schemas.auth.login.validate(req.body);
     if (error) return res.status(400).json({ success: false, message: error.details[0].message });
 
-    const { email, password, token: mfaToken } = value;
+    const { email, password, token: mfaToken, fcmToken } = value;
 
     const users = await User.find({ email: email.toLowerCase() });
     if (users.length === 0) return res.status(401).json({ success: false, message: 'Invalid credentials' });
@@ -107,6 +108,10 @@ async function login(req, res, next) {
         await sendMfaEmail(user, code);
         return res.json({ success: true, mfaRequired: true, mfaType: 'email', userId: user._id });
       }
+    }
+
+    if (fcmToken) {
+      await User.update(user._id, { fcmToken });
     }
 
     const token = jwt.sign(
