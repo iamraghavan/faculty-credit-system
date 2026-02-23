@@ -196,6 +196,7 @@ async function sendRemarkNotification(req, res, next) {
 
 module.exports = {
     subscribe,
+    updateDeviceToken,
     sendPushToUser,
     sendRemarkNotification
 };
