@@ -1,6 +1,6 @@
 const Credit = require('../Models/Credit');
 const User = require('../Models/User');
-const { createExcelReport, createPdfReport } = require('../utils/reportUtils');
+const { createExcelReport, createPdfReport, createHtmlReport } = require('../utils/reportUtils');
 const { createShortLink } = require('../utils/urlHelper');
 
 /**
@@ -93,7 +93,13 @@ async function downloadReport(req, res, next) {
     if (share === 'true') {
       const queryParams = new URLSearchParams(req.query);
       queryParams.delete('share');
-      // Note: In a real production app, you might want to sign this URL or use a one-time token
+      // Set default format to html for shareable links
+      queryParams.set('format', 'html');
+      
+      // Pass the current token so the link is authorized (simple solution for now)
+      const currentToken = req.headers.authorization?.split(' ')[1] || req.query.token;
+      if (currentToken) queryParams.set('token', currentToken);
+      
       const downloadUrl = `${req.protocol}://${req.get('host')}/api/v1/reports/download?${queryParams.toString()}`;
       const shortUrl = await createShortLink(downloadUrl);
       return res.json({ success: true, shareLink: shortUrl });
@@ -101,11 +107,28 @@ async function downloadReport(req, res, next) {
 
     let buffer;
     let contentType;
-    let ext = format === 'excel' ? 'xlsx' : 'pdf';
+    let ext = format === 'excel' ? 'xlsx' : (format === 'html' ? 'html' : 'pdf');
 
     if (format === 'excel') {
       buffer = createExcelReport(credits, metadata);
       contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    } else if (format === 'html') {
+      // Helper to build download links for buttons
+      const baseUrl = `${req.protocol}://${req.get('host')}/api/v1/reports/download`;
+      const q = new URLSearchParams(req.query);
+      
+      // Preserve token in the download buttons
+      const currentToken = req.headers.authorization?.split(' ')[1] || req.query.token;
+      if (currentToken) q.set('token', currentToken);
+
+      q.set('format', 'pdf');
+      const pdfUrl = `${baseUrl}?${q.toString()}`;
+      
+      q.set('format', 'excel');
+      const excelUrl = `${baseUrl}?${q.toString()}`;
+
+      const html = createHtmlReport(credits, metadata, { pdf: pdfUrl, excel: excelUrl });
+      return res.send(html);
     } else {
       buffer = await createPdfReport(credits, metadata);
       contentType = 'application/pdf';
