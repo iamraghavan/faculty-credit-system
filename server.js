@@ -16,6 +16,7 @@ const creditRoutes = require('./Routes/creditRoutes');
 const adminRoutes = require('./Routes/adminRoutes');
 const conversationRoutes = require('./Routes/conversations');
 const notificationRoutes = require('./Routes/notificationRoutes');
+const searchRoutes = require('./Routes/searchRoutes');
 const healthRouter = require('./Routes/health');
 const analyticsRouter = require('./Routes/analyticsRoutes');
 
@@ -103,6 +104,7 @@ app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/conversations', conversationRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/analytics', analyticsRouter);
+app.use('/api/v1/search', searchRoutes);
 
 // CDN & Shortener Routes
 const cdnRoutes = require('./Routes/cdnRoutes');
