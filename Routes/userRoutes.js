@@ -9,8 +9,12 @@ const {
   getUserById,
   adminUpdateUser,
   deleteUser,
+  changePassword,
+  getMfaSetup,
+  enableMfa,
+  disableMfa
 } = require('../Controllers/userController');
-const { authMiddleware } = require('../Middleware/authMiddleware');
+const { authMiddleware, adminOnly } = require('../Middleware/authMiddleware');
 
 /**
  * Use formidable to parse form-data directly into memory
@@ -24,18 +28,22 @@ const parseForm = formidable({
 // 02
 
 /**
- * User routes
+ * User routes (Self)
  */
 router.get('/me', authMiddleware, getProfile);
 router.put('/me', authMiddleware, parseForm, updateProfile);
+router.put('/me/password', authMiddleware, changePassword);
+router.get('/me/mfa/setup', authMiddleware, getMfaSetup);
+router.post('/me/mfa/enable', authMiddleware, enableMfa);
+router.post('/me/mfa/disable', authMiddleware, disableMfa);
 
 /**
  * Admin routes
  */
-router.post('/', authMiddleware, parseForm, adminCreateUser);
-router.get('/', authMiddleware, listUsers);
-router.get('/:id', authMiddleware, getUserById);
-router.put('/:id', authMiddleware, parseForm, adminUpdateUser);
-router.delete('/:id', authMiddleware, deleteUser);
+router.post('/', authMiddleware, adminOnly, parseForm, adminCreateUser);
+router.get('/', authMiddleware, adminOnly, listUsers);
+router.get('/:id', authMiddleware, adminOnly, getUserById);
+router.put('/:id', authMiddleware, adminOnly, parseForm, adminUpdateUser);
+router.delete('/:id', authMiddleware, adminOnly, deleteUser);
 
 module.exports = router;

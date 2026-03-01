@@ -12,6 +12,13 @@ const {
 const { handleProfileImageUpload } = require('../utils/uploadProfileImage');
 const { generateFacultyID, generateApiKey } = require('../utils/generateID');
 
+const { 
+  generateTotpSecret, 
+  generateTotpQrCode, 
+  verifyTotpToken,
+  generateMfaCode,
+  sendMfaEmail
+} = require('../utils/mfa');
 const ddbClient = new DynamoDBClient({ region: process.env.AWS_REGION });
 const ddbDocClient = DynamoDBDocumentClient.from(ddbClient);
 const TABLE_NAME = process.env.DYNAMO_DB_USERS;
@@ -101,7 +108,7 @@ async function updateProfile(req, res, next) {
 
     const params = {
       TableName: TABLE_NAME,
-      Key: { id: req.user.id },
+      Key: { _id: req.user._id || req.user.id },
       UpdateExpression: updateExpression,
       ExpressionAttributeNames: expressionAttributeNames,
       ExpressionAttributeValues: expressionAttributeValues,
@@ -109,7 +116,12 @@ async function updateProfile(req, res, next) {
     };
 
     const result = await ddbDocClient.send(new UpdateCommand(params));
-    res.json({ success: true, data: result.Attributes });
+    
+    const attributes = result.Attributes || {};
+    delete attributes.password;
+    delete attributes.mfaSecret;
+
+    res.json({ success: true, data: attributes });
   } catch (err) {
     next(err);
   }
@@ -179,7 +191,7 @@ async function adminCreateUser(req, res, next) {
  */
 async function getUserById(req, res, next) {
   try {
-    const params = { TableName: TABLE_NAME, Key: { id: req.params.id } };
+    const params = { TableName: TABLE_NAME, Key: { _id: req.params.id } };
     const result = await ddbDocClient.send(new GetCommand(params));
     if (!result.Item) return res.status(404).json({ success: false, message: 'User not found' });
     delete result.Item.password;
@@ -194,7 +206,7 @@ async function getUserById(req, res, next) {
  */
 async function deleteUser(req, res, next) {
   try {
-    const params = { TableName: TABLE_NAME, Key: { id: req.params.id } };
+    const params = { TableName: TABLE_NAME, Key: { _id: req.params.id } };
     await ddbDocClient.send(new DeleteCommand(params));
     res.json({ success: true, message: 'User deleted successfully' });
   } catch (err) {
@@ -230,7 +242,7 @@ async function adminUpdateUser(req, res, next) {
 
     const params = {
       TableName: TABLE_NAME,
-      Key: { id: req.params.id },
+      Key: { _id: req.params.id },
       UpdateExpression: updateExpression,
       ExpressionAttributeNames: expressionAttributeNames,
       ExpressionAttributeValues: expressionAttributeValues,
@@ -241,6 +253,116 @@ async function adminUpdateUser(req, res, next) {
     if (!result.Attributes) return res.status(404).json({ success: false, message: 'User not found' });
     delete result.Attributes.password;
     res.json({ success: true, data: result.Attributes });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Change Password
+ */
+async function changePassword(req, res, next) {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: 'Current and new password are required' });
+    }
+
+    const userId = req.user._id || req.user.id;
+    const user = await User.findById(userId);
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) return res.status(400).json({ success: false, message: 'Current password is incorrect' });
+
+    const salt = await bcrypt.genSalt(10);
+    const hashed = await bcrypt.hash(newPassword, salt);
+
+    await User.update(userId, { password: hashed });
+
+    res.json({ success: true, message: 'Password updated successfully' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Get MFA Setup (App)
+ */
+async function getMfaSetup(req, res, next) {
+  try {
+    const user = req.user;
+    const secret = generateTotpSecret(user.email);
+    const qrCode = await generateTotpQrCode(secret);
+
+    res.json({
+      success: true,
+      secret: secret.base32,
+      qrCode: qrCode
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Enable MFA
+ */
+async function enableMfa(req, res, next) {
+  try {
+    const { type, token, secret } = req.body; // type: 'app' or 'email'
+    const userId = req.user._id || req.user.id;
+
+    if (type === 'app') {
+      if (!token || !secret) return res.status(400).json({ success: false, message: 'Token and Secret are required' });
+      const isValid = verifyTotpToken(secret, token);
+      if (!isValid) return res.status(400).json({ success: false, message: 'Invalid token' });
+
+      await User.update(userId, {
+        mfaEnabled: true,
+        mfaAppEnabled: true,
+        mfaSecret: secret,
+        mfaEmailEnabled: false
+      });
+    } else if (type === 'email') {
+      await User.update(userId, {
+        mfaEnabled: true,
+        mfaEmailEnabled: true,
+        mfaAppEnabled: false,
+        mfaSecret: null
+      });
+    } else {
+      return res.status(400).json({ success: false, message: 'Invalid MFA type' });
+    }
+
+    res.json({ success: true, message: `MFA (${type}) enabled successfully` });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Disable MFA
+ */
+async function disableMfa(req, res, next) {
+  try {
+    const { token } = req.body;
+    const userId = req.user._id || req.user.id;
+    const user = await User.findById(userId);
+
+    if (user.mfaAppEnabled && user.mfaSecret) {
+      if (!token) return res.status(400).json({ success: false, message: 'Token is required to disable' });
+      const isValid = verifyTotpToken(user.mfaSecret, token);
+      if (!isValid) return res.status(400).json({ success: false, message: 'Invalid token' });
+    }
+
+    await User.update(userId, {
+      mfaEnabled: false,
+      mfaAppEnabled: false,
+      mfaEmailEnabled: false,
+      mfaSecret: null
+    });
+
+    res.json({ success: true, message: 'MFA disabled successfully' });
   } catch (err) {
     next(err);
   }
@@ -318,4 +440,8 @@ module.exports = {
   listUsers,
   getUserById,
   deleteUser,
+  changePassword,
+  getMfaSetup,
+  enableMfa,
+  disableMfa
 };
