@@ -52,8 +52,8 @@ async function downloadReport(req, res, next) {
   try {
     const { level, id, format, academicYear, startDate, endDate, type, status, share } = req.query;
 
-    if (!['pdf', 'excel'].includes(format)) {
-      return res.status(400).json({ success: false, message: 'Invalid format. Use pdf or excel.' });
+    if (!['pdf', 'excel', 'html'].includes(format)) {
+      return res.status(400).json({ success: false, message: 'Invalid format. Use pdf, excel or html.' });
     }
 
     // Reuse filter logic (simplified for buffer generation)
@@ -86,7 +86,8 @@ async function downloadReport(req, res, next) {
     const metadata = {
       level: level || 'College',
       title: `${(level || 'College').toUpperCase()} Credit Report ${id ? `- ${id}` : ''}`,
-      date: new Date().toLocaleString()
+      date: new Date().toLocaleString(),
+      generatedBy: req.user?.name || 'Administrative System'
     };
 
     // Shareable Link logic
