@@ -14,7 +14,7 @@ const {
   enableMfa,
   disableMfa
 } = require('../Controllers/userController');
-const { authMiddleware, adminOnly } = require('../Middleware/authMiddleware');
+const { authMiddleware, adminOrOA } = require('../Middleware/authMiddleware');
 
 /**
  * Use formidable to parse form-data directly into memory
@@ -40,10 +40,10 @@ router.post('/me/mfa/disable', authMiddleware, disableMfa);
 /**
  * Admin routes
  */
-router.post('/', authMiddleware, adminOnly, parseForm, adminCreateUser);
-router.get('/', authMiddleware, adminOnly, listUsers);
-router.get('/:id', authMiddleware, adminOnly, getUserById);
-router.put('/:id', authMiddleware, adminOnly, parseForm, adminUpdateUser);
-router.delete('/:id', authMiddleware, adminOnly, deleteUser);
+router.post('/', authMiddleware, adminOrOA, parseForm, adminCreateUser);
+router.get('/', authMiddleware, adminOrOA, listUsers);
+router.get('/:id', authMiddleware, adminOrOA, getUserById);
+router.put('/:id', authMiddleware, adminOrOA, parseForm, adminUpdateUser);
+router.delete('/:id', authMiddleware, adminOrOA, deleteUser);
 
 module.exports = router;
