@@ -12,7 +12,9 @@ const {
   changePassword,
   getMfaSetup,
   enableMfa,
-  disableMfa
+  disableMfa,
+  getSessions,
+  exportUserData
 } = require('../Controllers/userController');
 const { authMiddleware, adminOrOA } = require('../Middleware/authMiddleware');
 
@@ -36,6 +38,8 @@ router.put('/me/password', authMiddleware, changePassword);
 router.get('/me/mfa/setup', authMiddleware, getMfaSetup);
 router.post('/me/mfa/enable', authMiddleware, enableMfa);
 router.post('/me/mfa/disable', authMiddleware, disableMfa);
+router.get('/me/sessions', authMiddleware, getSessions);
+router.get('/me/export', authMiddleware, exportUserData);
 
 /**
  * Admin routes

@@ -1,5 +1,7 @@
 const bcrypt = require('bcryptjs');
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
+const User = require('../Models/User');
+const Credit = require('../Models/Credit');
 const {
   DynamoDBDocumentClient,
   GetCommand,
@@ -432,6 +434,58 @@ async function listUsers(req, res, next) {
   }
 }
 
+/**
+ * Get Active Sessions
+ */
+async function getSessions(req, res, next) {
+  try {
+    // In a stateless JWT setup, tracking multiple sessions requires db-backed tokens.
+    // For now, we return the current session assuming it is the active one.
+    const currentSession = {
+      id: req.user.id || req.user._id,
+      device: req.headers['user-agent'] || 'Unknown Device',
+      ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'Unknown IP',
+      lastActive: new Date().toISOString(),
+      isCurrent: true
+    };
+    res.json({ success: true, sessions: [currentSession] });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Export User Data
+ */
+async function exportUserData(req, res, next) {
+  try {
+    const userId = req.user._id || req.user.id;
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const credits = await Credit.find({ faculty: user.facultyID });
+    
+    let csvData = `--- USER PROFILE ---\n`;
+    csvData += `Faculty ID,Name,Email,Department,Designation\n`;
+    csvData += `"${user.facultyID || ''}","${user.name || ''}","${user.email || ''}","${user.department || ''}","${user.designation || ''}"\n\n`;
+    
+    csvData += `--- CREDITS DATA ---\n`;
+    csvData += `Type,Title,Points,Status,Academic Year,Date\n`;
+    (credits || []).forEach(c => {
+      csvData += `"${c.type || ''}","${c.title ? c.title.replace(/"/g, '""') : ''}","${c.points || 0}","${c.status || ''}","${c.academicYear || ''}","${c.createdAt || ''}"\n`;
+    });
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="UserData_${user.facultyID || 'Export'}.csv"`);
+    res.send(csvData);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getProfile,
   updateProfile,
@@ -443,5 +497,7 @@ module.exports = {
   changePassword,
   getMfaSetup,
   enableMfa,
-  disableMfa
+  disableMfa,
+  getSessions,
+  exportUserData
 };
