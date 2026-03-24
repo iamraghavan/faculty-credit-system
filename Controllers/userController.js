@@ -224,7 +224,14 @@ async function adminUpdateUser(req, res, next) {
     const allowedFields = ['name', 'email', 'phone', 'department', 'college', 'role', 'isActive', 'prefix', 'roleCategory', 'designation', 'whatsappNumber', 'whatsappVerified'];
     const updates = {};
     for (const field of allowedFields) {
-      if (req.body[field] !== undefined) updates[field] = req.body[field];
+      if (req.body[field] !== undefined) {
+        let value = req.body[field];
+        // Cast string "true"/"false" to actual boolean
+        if (field === 'isActive') {
+          value = String(value).toLowerCase() === 'true';
+        }
+        updates[field] = value;
+      }
     }
 
     if (updates.whatsappNumber && !/^\d{10}$/.test(updates.whatsappNumber)) {
