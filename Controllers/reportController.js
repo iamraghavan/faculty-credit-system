@@ -9,12 +9,12 @@ const { createShortLink } = require('../utils/urlHelper');
  */
 async function getReportData(req, res, next) {
   try {
-    const { level, id, academicYear, startDate, endDate, type, status } = req.query;
+    const { level, id, academicYear, startDate, endDate, type, status, view = 'transactions', sortBy = 'total', order = 'desc' } = req.query;
 
     let filter = {};
-    if (academicYear) filter.academicYear = academicYear;
-    if (type) filter.type = type;
-    if (status) filter.status = status;
+    if (academicYear && academicYear !== 'all') filter.academicYear = academicYear;
+    if (type && type !== 'all') filter.type = type;
+    if (status && status !== 'all') filter.status = status;
 
     let credits = await Credit.find(filter);
 
@@ -35,9 +35,54 @@ async function getReportData(req, res, next) {
       });
     }
 
+    if (view === 'ranking') {
+      // Aggregate by faculty
+      const facultyMap = {};
+      credits.forEach(c => {
+        const fId = c.faculty;
+        if (!facultyMap[fId]) {
+          facultyMap[fId] = {
+            faculty: fId,
+            facultyID: c.facultySnapshot?.facultyID || 'N/A',
+            name: c.facultySnapshot?.name || 'Unknown',
+            department: c.facultySnapshot?.department || 'N/A',
+            college: c.facultySnapshot?.college || 'N/A',
+            positive: 0,
+            negative: 0,
+            total: 0,
+            count: 0
+          };
+        }
+        const pts = Number(c.points) || 0;
+        if (c.type === 'positive') facultyMap[fId].positive += pts;
+        else if (c.type === 'negative') facultyMap[fId].negative += Math.abs(pts);
+        
+        facultyMap[fId].total += pts;
+        facultyMap[fId].count += 1;
+      });
+
+      let ranking = Object.values(facultyMap);
+
+      // Sorting
+      ranking.sort((a, b) => {
+        const valA = a[sortBy] || 0;
+        const valB = b[sortBy] || 0;
+        return order === 'asc' ? valA - valB : valB - valA;
+      });
+
+      return res.json({
+        success: true,
+        count: ranking.length,
+        view: 'ranking',
+        data: ranking
+      });
+    }
+
+    // Default: Transactions view
     res.json({
       success: true,
       count: credits.length,
+      view: 'transactions',
       data: credits
     });
   } catch (err) {
@@ -50,28 +95,28 @@ async function getReportData(req, res, next) {
  */
 async function downloadReport(req, res, next) {
   try {
-    const { level, id, format, academicYear, startDate, endDate, type, status, share } = req.query;
+    const { level, id, format, academicYear, startDate, endDate, type, status, share, view = 'transactions', sortBy = 'total', order = 'desc' } = req.query;
 
     if (!['pdf', 'excel', 'html'].includes(format)) {
       return res.status(400).json({ success: false, message: 'Invalid format. Use pdf, excel or html.' });
     }
 
-    // Reuse filter logic (simplified for buffer generation)
+    // Reuse filter logic
     let filter = {};
-    if (academicYear) filter.academicYear = academicYear;
-    if (type) filter.type = type;
-    if (status) filter.status = status;
+    if (academicYear && academicYear !== 'all') filter.academicYear = academicYear;
+    if (type && type !== 'all') filter.type = type;
+    if (status && status !== 'all') filter.status = status;
 
-    let credits = await Credit.find(filter);
+    let data = await Credit.find(filter);
 
     if (level === 'department' && id) {
-      credits = credits.filter(c => c.facultySnapshot?.department === id);
+      data = data.filter(c => c.facultySnapshot?.department === id);
     } else if (level === 'faculty' && id) {
-      credits = credits.filter(c => c.faculty === id);
+      data = data.filter(c => c.faculty === id);
     }
 
     if (startDate || endDate) {
-      credits = credits.filter(c => {
+      data = data.filter(c => {
         const d = new Date(c.createdAt);
         if (startDate && d < new Date(startDate)) return false;
         if (endDate && d > new Date(endDate)) return false;
@@ -79,7 +124,38 @@ async function downloadReport(req, res, next) {
       });
     }
 
-    if (credits.length === 0) {
+    if (view === 'ranking') {
+      const facultyMap = {};
+      data.forEach(c => {
+        const fId = c.faculty;
+        if (!facultyMap[fId]) {
+          facultyMap[fId] = {
+            faculty: fId,
+            facultyID: c.facultySnapshot?.facultyID || 'N/A',
+            name: c.facultySnapshot?.name || 'Unknown',
+            department: c.facultySnapshot?.department || 'N/A',
+            college: c.facultySnapshot?.college || 'N/A',
+            positive: 0,
+            negative: 0,
+            total: 0,
+            count: 0
+          };
+        }
+        const pts = Number(c.points) || 0;
+        if (pts > 0) facultyMap[fId].positive += pts;
+        else facultyMap[fId].negative += Math.abs(pts);
+        facultyMap[fId].total += pts;
+        facultyMap[fId].count += 1;
+      });
+      data = Object.values(facultyMap);
+      data.sort((a, b) => {
+        const valA = a[sortBy] || 0;
+        const valB = b[sortBy] || 0;
+        return order === 'asc' ? valA - valB : valB - valA;
+      });
+    }
+
+    if (data.length === 0) {
       return res.status(404).json({ success: false, message: 'No data to report' });
     }
 
@@ -111,7 +187,7 @@ async function downloadReport(req, res, next) {
     let ext = format === 'excel' ? 'xlsx' : (format === 'html' ? 'html' : 'pdf');
 
     if (format === 'excel') {
-      buffer = createExcelReport(credits, metadata);
+      buffer = createExcelReport(data, metadata, view);
       contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     } else if (format === 'html') {
       // Helper to build download links for buttons
@@ -128,10 +204,10 @@ async function downloadReport(req, res, next) {
       q.set('format', 'excel');
       const excelUrl = `${baseUrl}?${q.toString()}`;
 
-      const html = createHtmlReport(credits, metadata, { pdf: pdfUrl, excel: excelUrl });
+      const html = createHtmlReport(data, metadata, { pdf: pdfUrl, excel: excelUrl }, view);
       return res.send(html);
     } else {
-      buffer = await createPdfReport(credits, metadata);
+      buffer = await createPdfReport(data, metadata, view);
       contentType = 'application/pdf';
     }
 
