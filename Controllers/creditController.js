@@ -217,7 +217,7 @@ async function adminIssueNegativeCredit(req, res, next) {
 
         await sendWhatsAppMessage({
           phone: faculty.whatsappNumber,
-          templateName: 'fcs_negative_credit_alert_v1_m',
+          templateName: 'fcs_negative_credit_alert_v1',
           language: 'en',
           textParams: [
             faculty.name,           // {{faculty_name}}

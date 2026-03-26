@@ -137,7 +137,7 @@ async function sendRemarkNotification(req, res, next) {
 
         await sendWhatsAppMessage({
           phone: faculty.whatsappNumber,
-          templateName: 'fcs_negative_credit_alert_v1_m',
+          templateName: 'fcs_negative_credit_alert_v1',
           language: 'en',
           textParams: [
             faculty.name,           // {{faculty_name}}
@@ -167,4 +167,59 @@ async function sendRemarkNotification(req, res, next) {
   }
 }
 
-module.exports = { sendRemarkNotification };
+async function broadcastNotification(req, res, next) {
+  try {
+    const { title, body, url, icon } = req.body;
+    if (!title || !body) {
+      return res.status(400).json({ success: false, message: 'Title and body are required for broadcast' });
+    }
+
+    const payload = {
+      title,
+      body,
+      url: url || (process.env.FRONTEND_URL ? `${process.env.FRONTEND_URL}/faculty/credits` : '#'),
+      icon: icon || '/favicon.ico',
+      data: { type: 'broadcast', timestamp: new Date().toISOString() }
+    };
+
+    // 1. Get all Web Push Subscriptions
+    const PushSubscription = require('../Models/PushSubscription');
+    const webpush = require('web-push');
+
+    // Configure web-push if not already
+    if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+      webpush.setVapidDetails(
+        process.env.VAPID_MAILTO || 'mailto:admin@example.com',
+        process.env.VAPID_PUBLIC_KEY,
+        process.env.VAPID_PRIVATE_KEY
+      );
+    }
+
+    const subscriptions = await PushSubscription.getAll();
+    const pushPromises = subscriptions.map(async (sub) => {
+      try {
+        await webpush.sendNotification(sub, JSON.stringify(payload));
+      } catch (err) {
+        if (err.statusCode === 410 || err.statusCode === 404) {
+          await PushSubscription.delete(sub.endpoint);
+        }
+      }
+    });
+
+    // 2. Get all Users with FCM Tokens
+    const { sendFcmNotification } = require('../utils/firebase');
+    const users = await User.find(); // Find all users
+    const fcmPromises = users
+      .filter(u => u.fcmToken)
+      .map(u => sendFcmNotification(u.fcmToken, payload));
+
+    // Run all in parallel
+    await Promise.allSettled([...pushPromises, ...fcmPromises]);
+
+    return res.json({ success: true, message: 'Broadcast sent to all active devices' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { sendRemarkNotification, broadcastNotification };

@@ -52,5 +52,14 @@ module.exports = {
         const client = getDynamoClient();
         await client.send(new DeleteCommand({ TableName: TABLE, Key: { endpoint } }));
         return { deleted: true };
+    },
+
+    /**
+     * Get all active subscriptions (for broadcasting)
+     */
+    async getAll() {
+        const client = getDynamoClient();
+        const res = await client.send(new ScanCommand({ TableName: TABLE }));
+        return res.Items || [];
     }
 };
