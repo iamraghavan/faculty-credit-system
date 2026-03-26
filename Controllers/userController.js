@@ -72,13 +72,12 @@ async function getProfile(req, res, next) {
  */
 async function updateProfile(req, res, next) {
   try {
-    if (!req.user) return res.status(401).json({ success: false, message: 'Unauthorized' });
-
+    const fields = req.fields || req.body || {};
     const allowedFields = ['name', 'email', 'phone', 'department', 'prefix', 'roleCategory', 'designation', 'whatsappNumber'];
     const updates = {};
 
     for (const field of allowedFields) {
-      if (req.body[field] !== undefined) updates[field] = req.body[field];
+      if (fields[field] !== undefined) updates[field] = fields[field];
     }
 
     // Validate WhatsApp if updated
@@ -134,7 +133,8 @@ async function updateProfile(req, res, next) {
  */
 async function adminCreateUser(req, res, next) {
   try {
-    const { name, email, password, college, department, role, prefix, roleCategory, designation, whatsappNumber } = req.body;
+    const fields = req.fields || req.body || {};
+    const { name, email, password, college, department, role, prefix, roleCategory, designation, whatsappNumber } = fields;
     if (!name || !email || !college || !password || !roleCategory || !designation)
       return res.status(400).json({ success: false, message: 'Missing required fields' });
 
@@ -221,11 +221,12 @@ async function deleteUser(req, res, next) {
  */
 async function adminUpdateUser(req, res, next) {
   try {
+    const fields = req.fields || req.body || {};
     const allowedFields = ['name', 'email', 'phone', 'department', 'college', 'role', 'isActive', 'prefix', 'roleCategory', 'designation', 'whatsappNumber', 'whatsappVerified'];
     const updates = {};
     for (const field of allowedFields) {
-      if (req.body[field] !== undefined) {
-        let value = req.body[field];
+      if (fields[field] !== undefined) {
+        let value = fields[field];
         // Cast string "true"/"false" to actual boolean
         if (field === 'isActive') {
           value = String(value).toLowerCase() === 'true';
