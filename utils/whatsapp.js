@@ -15,9 +15,15 @@ const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
  */
 async function sendWhatsAppMessage({ phone, templateName, textParams = [], buttonParams = [], language = 'en_US' }) {
     try {
+        let recipientPhone = String(phone).trim();
+        // If it's a 10-digit number, prepend 91 (India)
+        if (/^\d{10}$/.test(recipientPhone)) {
+            recipientPhone = `91${recipientPhone}`;
+        }
+
         const payload = {
             token: WHATSAPP_TOKEN,
-            phone: phone,
+            phone: recipientPhone,
             template_name: templateName,
             template_language: language,
         };
