@@ -43,40 +43,40 @@ const upload = multer({
  * Faculty routes
  */
 // Positive Credits
-router.post('/positive', authMiddleware, ensureWhatsappVerified, upload.single('proof'), submitPositiveCredit);
-router.put('/positive/:creditId', authMiddleware, ensureWhatsappVerified, upload.single('proof'), updatePositiveCredit);
-router.delete('/positive/:creditId', authMiddleware, ensureWhatsappVerified, deletePositiveCredit);
+router.post('/credits/positive', authMiddleware, ensureWhatsappVerified, upload.single('proof'), submitPositiveCredit);
+router.put('/credits/positive/:creditId', authMiddleware, ensureWhatsappVerified, upload.single('proof'), updatePositiveCredit);
+router.delete('/credits/positive/:creditId', authMiddleware, ensureWhatsappVerified, deletePositiveCredit);
 
-router.get('/faculty/:facultyId', authMiddleware, listCreditsForFaculty);
+router.get('/credits/faculty/:facultyId', authMiddleware, listCreditsForFaculty);
 
 /**
  * Admin routes
  */
 router.post('/credit-title', authMiddleware, adminOnly, createCreditTitle);
 router.get('/credit-title', authMiddleware, listCreditTitles);
-router.post('/negative', authMiddleware, adminOrOA, upload.single('proof'), adminIssueNegativeCredit);
-router.put('/negative/:creditId', authMiddleware, adminOrOA, upload.single('proof'), updateNegativeCredit);
-router.delete('/negative/:creditId', authMiddleware, adminOrOA, deleteNegativeCredit);
+router.post('/credits/negative', authMiddleware, adminOrOA, upload.single('proof'), adminIssueNegativeCredit);
+router.put('/credits/negative/:creditId', authMiddleware, adminOrOA, upload.single('proof'), updateNegativeCredit);
+router.delete('/credits/negative/:creditId', authMiddleware, adminOrOA, deleteNegativeCredit);
 
 // Faculty: get all negative credits (with filters)
-router.get('/negative', authMiddleware, getNegativeCredits);
+router.get('/credits/negative', authMiddleware, getNegativeCredits);
 
 // Faculty: appeal a negative credit
-router.post('/:creditId/appeal', authMiddleware, ensureWhatsappVerified, upload.single('proof'), appealNegativeCredit);
-router.put('/appeals/:creditId', authMiddleware, ensureWhatsappVerified, upload.single('proof'), updateAppeal);
-router.delete('/appeals/:creditId', authMiddleware, ensureWhatsappVerified, deleteAppeal);
+router.post('/credits/:creditId/appeal', authMiddleware, ensureWhatsappVerified, upload.single('proof'), appealNegativeCredit);
+router.put('/credits/appeals/:creditId', authMiddleware, ensureWhatsappVerified, upload.single('proof'), updateAppeal);
+router.delete('/credits/appeals/:creditId', authMiddleware, ensureWhatsappVerified, deleteAppeal);
 
 // Get Single Credit details
-router.get('/:creditId', authMiddleware, getSingleCredit);
+router.get('/credits/:creditId', authMiddleware, getSingleCredit);
 
 router.get(
-  '/faculty/:facultyId/negative',
+  '/credits/faculty/:facultyId/negative',
   authMiddleware,
   getNegativeCreditsByFacultyId
 );
 
-router.post('/:facultyId/recalc-credits', authMiddleware, recalcCreditsController);
-router.get('/:facultyId/raw', getFacultyCredits);
+router.post('/credits/:facultyId/recalc-credits', authMiddleware, recalcCreditsController);
+router.get('/:facultyId/credits', getFacultyCredits);
 
 
 module.exports = router;
