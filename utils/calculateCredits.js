@@ -1,15 +1,18 @@
 // utils/calculateCredits.js
 'use strict';
 
+const _ = require('lodash');
+const { create, all } = require('mathjs');
 const Credit = require('../Models/Credit');
 const User = require('../Models/User');
 
-const EXCLUDE_STATUS = new Set(['pending', 'deleted']);
+// Configure mathjs for high precision decimal arithmetic if needed
+const math = create(all, { precision: 16 });
+
+const EXCLUDE_STATUS = ['pending', 'deleted'];
 
 /**
  * Determine if this user object is from DynamoDB (plain object, no `.save()`).
- * @param {Object} user
- * @returns {boolean}
  */
 function isDynamoUserModel(user) {
   return user && typeof user.save !== 'function';
@@ -17,148 +20,107 @@ function isDynamoUserModel(user) {
 
 /**
  * Fetch the user by ID and validate existence.
- * @param {string} facultyId
- * @returns {Promise<Object>} user object
- * @throws {Error}
  */
 async function fetchUser(facultyId) {
-  if (!facultyId) {
-    const err = new Error('Faculty ID parameter is required.');
-    err.code = 'MISSING_FACULTY_ID';
-    throw err;
-  }
+  if (!facultyId) throw new Error('Faculty ID parameter is required.');
   const user = await User.findById(facultyId);
-  if (!user) {
-    const err = new Error(`User not found for id=${facultyId}`);
-    err.code = 'USER_NOT_FOUND';
-    throw err;
-  }
+  if (!user) throw new Error(`User not found for id=${facultyId}`);
   return user;
 }
 
 /**
  * Fetch all credits for a faculty and sort them chronologically.
- * Filters out credits whose status or appeal.status are excluded (pending/deleted).
- * @param {string} facultyId
- * @returns {Promise<Array>} sorted credits (filtered)
  */
 async function fetchAndSortCredits(facultyId) {
   const credits = await Credit.find({ faculty: facultyId });
-  if (!Array.isArray(credits)) {
-    const err = new Error(`Unexpected result fetching credits for facultyId=${facultyId}`);
-    err.code = 'CREDITS_FETCH_ERROR';
-    throw err;
-  }
+  if (!Array.isArray(credits)) throw new Error(`Credits fetch error for ${facultyId}`);
 
-  // Filter out credits with excluded status early to reduce further work
-  const filtered = credits.filter((c) => {
-    const status = (c && c.status) ? String(c.status).trim().toLowerCase() : '';
-    if (EXCLUDE_STATUS.has(status)) return false;
-
-    const appealStatus = (c && c.appeal && c.appeal.status) ? String(c.appeal.status).trim().toLowerCase() : '';
-    if (appealStatus && EXCLUDE_STATUS.has(appealStatus)) return false;
-
-    return true;
-  });
-
-  filtered.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-  return filtered;
+  // Use Lodash to filter and sort
+  return _.chain(credits)
+    .filter(c => {
+      const status = _.get(c, 'status', '').toLowerCase();
+      const appealStatus = _.get(c, 'appeal.status', '').toLowerCase();
+      return !_.includes(EXCLUDE_STATUS, status) && !_.includes(EXCLUDE_STATUS, appealStatus);
+    })
+    .sortBy(c => new Date(c.createdAt))
+    .value();
 }
 
 /**
- * Process credits array to compute positive, negative, net by year, and overall totals.
- * Expects input credits already filtered to exclude pending/deleted statuses (by fetchAndSortCredits),
- * but defends anyway.
- * @param {Array} credits
- * @returns {Object} result object with metrics
+ * Process credits array using functional patterns and precision math.
  */
 function processCredits(credits) {
-  const positiveByYear = Object.create(null);   // points
-  const negativeByYear = Object.create(null);   // points (positive numbers for deductions)
-  const netByYear = Object.create(null);        // net points (positive - negative)
-  const positiveCountByYear = Object.create(null);
-  const negativeCountByYear = Object.create(null);
+  // Initialize accumulators
+  const stats = {
+    runningTotal: math.bignumber(0),
+    totalPositive: math.bignumber(0),
+    totalNegative: math.bignumber(0),
+    eventsApplied: 0,
+    byYear: {}
+  };
 
-  let runningTotal = 0;
-  let totalPositive = 0;       // sum of positive points (approved)
-  let totalNegative = 0;       // sum of negative points actually applied
-  let eventsApplied = 0;
+  _.forEach(credits, (credit) => {
+    const year = _.get(credit, 'academicYear', 'unknown');
+    const pts = math.bignumber(_.get(credit, 'points', 0));
+    const type = _.get(credit, 'type', '');
+    const status = _.get(credit, 'status', '').toLowerCase();
+    const appealStatus = _.get(credit, 'appeal.status', '').toLowerCase();
 
-  for (let i = 0; i < credits.length; i++) {
-    const credit = credits[i];
-    if (!credit) continue;
-
-    // Defensive status checks (skip if excluded)
-    const status = (credit.status || '').toString().trim().toLowerCase();
-    if (EXCLUDE_STATUS.has(status)) continue;
-    const appealStatusRaw = (credit.appeal && credit.appeal.status) ? String(credit.appeal.status).trim().toLowerCase() : '';
-    if (appealStatusRaw && EXCLUDE_STATUS.has(appealStatusRaw)) continue;
-
-    const year = credit.academicYear || 'unknown';
-
-    if (!positiveByYear[year]) positiveByYear[year] = 0;
-    if (!negativeByYear[year]) negativeByYear[year] = 0;
-    if (!netByYear[year]) netByYear[year] = 0;
-    if (!positiveCountByYear[year]) positiveCountByYear[year] = 0;
-    if (!negativeCountByYear[year]) negativeCountByYear[year] = 0;
-
-    // Defensive points coercion
-    const pts = Number(credit.points ?? 0) || 0;
-
-    if (String(credit.type) === 'positive') {
-      // Only count approved positives
-      if (String(credit.status).toLowerCase() === 'approved') {
-        positiveByYear[year] += pts;
-        positiveCountByYear[year] += 1;
-        netByYear[year] += pts;
-        runningTotal += pts;
-        totalPositive += pts;
-        eventsApplied++;
-      }
-      // else: pending/other statuses are ignored (we filtered pending/deleted earlier)
-    } else if (String(credit.type) === 'negative') {
-      // Negative applies either when appeal.status === 'rejected' OR
-      // when there is no appeal and credit.status === 'approved'
-      let applyNegative = false;
-      if (appealStatusRaw) {
-        if (appealStatusRaw === 'rejected') applyNegative = true;
-        else applyNegative = false;
-      } else {
-        if (String(credit.status).toLowerCase() === 'approved') applyNegative = true;
-      }
-
-      if (applyNegative) {
-        const deduction = Math.abs(pts);
-        negativeByYear[year] += deduction;
-        negativeCountByYear[year] += 1;
-        netByYear[year] -= deduction;
-        runningTotal -= deduction;
-        totalNegative += deduction;
-        eventsApplied++;
-      }
-    } else {
-      // Unknown type — ignore for positive/negative sums but still keep net/year presence
+    // Ensure year entry exists
+    if (!stats.byYear[year]) {
+      stats.byYear[year] = {
+        positive: math.bignumber(0),
+        negative: math.bignumber(0), // stored as positive deduction amount
+        net: math.bignumber(0),
+        posCount: 0,
+        negCount: 0
+      };
     }
-  }
 
+    const yearData = stats.byYear[year];
+
+    if (type === 'positive' && status === 'approved') {
+      yearData.positive = math.add(yearData.positive, pts);
+      yearData.net = math.add(yearData.net, pts);
+      yearData.posCount++;
+      
+      stats.totalPositive = math.add(stats.totalPositive, pts);
+      stats.runningTotal = math.add(stats.runningTotal, pts);
+      stats.eventsApplied++;
+    } 
+    else if (type === 'negative') {
+      // Apply if (no appeal AND approved) OR (appeal AND rejected)
+      const shouldApply = appealStatus ? (appealStatus === 'rejected') : (status === 'approved');
+      
+      if (shouldApply) {
+        const deduction = math.abs(pts);
+        yearData.negative = math.add(yearData.negative, deduction);
+        yearData.net = math.subtract(yearData.net, deduction);
+        yearData.negCount++;
+
+        stats.totalNegative = math.add(stats.totalNegative, deduction);
+        stats.runningTotal = math.subtract(stats.runningTotal, deduction);
+        stats.eventsApplied++;
+      }
+    }
+  });
+
+  // Convert bignumbers back to numbers for the final result
   return {
-    runningTotal,
-    totalPositive,
-    totalNegative,
-    eventsApplied,
-    positiveByYear,
-    negativeByYear,
-    netByYear,
-    positiveCountByYear,
-    negativeCountByYear,
+    runningTotal: math.number(stats.runningTotal),
+    totalPositive: math.number(stats.totalPositive),
+    totalNegative: math.number(stats.totalNegative),
+    eventsApplied: stats.eventsApplied,
+    positiveByYear: _.mapValues(stats.byYear, y => math.number(y.positive)),
+    negativeByYear: _.mapValues(stats.byYear, y => math.number(y.negative)),
+    netByYear: _.mapValues(stats.byYear, y => math.number(y.net)),
+    positiveCountByYear: _.mapValues(stats.byYear, y => y.posCount),
+    negativeCountByYear: _.mapValues(stats.byYear, y => y.negCount)
   };
 }
 
 /**
  * Persist the recalculated credits back to the user record.
- * @param {Object} user
- * @param {Object} metrics
- * @returns {Promise<void>}
  */
 async function updateUserCredits(user, metrics) {
   const updatePayload = {
@@ -170,7 +132,6 @@ async function updateUserCredits(user, metrics) {
   if (isDynamoUserModel(user)) {
     await User.update(user._id, updatePayload);
   } else {
-    // MongoDB path
     user.currentCredit = metrics.runningTotal;
     user.creditsByYear = metrics.netByYear;
     user.updatedAt = updatePayload.updatedAt;
@@ -179,41 +140,26 @@ async function updateUserCredits(user, metrics) {
 }
 
 /**
- * Recalculate faculty credits for a given faculty user ID.
- * Excludes credits whose status or appeal.status are 'pending' or 'deleted'.
- * @param {string} facultyId
- * @returns {Promise<Object>} result metrics
- * @throws {Error} with helpful code/message
+ * Main Recalculation Entry Point
  */
 async function recalcFacultyCredits(facultyId) {
   try {
     const user = await fetchUser(facultyId);
-    const credits = await fetchAndSortCredits(facultyId); // already filters pending/deleted
+    const credits = await fetchAndSortCredits(facultyId);
     const metrics = processCredits(credits);
     await updateUserCredits(user, metrics);
 
     return {
-      currentCredit: metrics.runningTotal,
-      creditsByYear: metrics.netByYear,
-      positiveByYear: metrics.positiveByYear,
-      negativeByYear: metrics.negativeByYear,
-      positiveCountByYear: metrics.positiveCountByYear,
-      negativeCountByYear: metrics.negativeCountByYear,
-      totalPositive: metrics.totalPositive,
-      totalNegative: metrics.totalNegative,
-      netTotal: metrics.runningTotal,
-      eventsApplied: metrics.eventsApplied,
+      ...metrics,
+      netTotal: metrics.runningTotal
     };
   } catch (err) {
-    const error = new Error(`recalcFacultyCredits failed: ${err.message}`);
-    error.original = err;
-    throw error;
+    throw new Error(`recalcFacultyCredits failed: ${err.message}`);
   }
 }
 
 module.exports = {
   recalcFacultyCredits,
-  // Export internal functions for testing if desired
   fetchUser,
   fetchAndSortCredits,
   processCredits,
