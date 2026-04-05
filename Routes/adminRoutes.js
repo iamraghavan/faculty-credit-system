@@ -14,7 +14,8 @@ const {
   getNegativeAppeals,
   oaGetOwnIssuedCredits,
   oaDeleteIssuedCredit,
-  listNegativeCreditsForFaculty
+  listNegativeCreditsForFaculty,
+  adminReopenAppealWindow
 } = require('../Controllers/adminController');
 
 const {
@@ -79,7 +80,7 @@ router.post('/credits/negative', authMiddleware, adminOrOA, upload.single('proof
 router.get('/faculty/:facultyId/credits/negative', authMiddleware, listNegativeCreditsForFaculty);
 
 // GET /api/v1/admin/credits/negative
-router.get('/credits/negative', adminListNegativeCredits);
+router.get('/credits/negative', authMiddleware, adminOrOA, adminListNegativeCredits);
 
 // GET /api/v1/admin/credits/negative/:id
 router.get('/credits/negative/:id', adminGetNegativeCreditById);
@@ -100,6 +101,9 @@ router.put('/credits/negative/:creditId/appeal', authMiddleware, adminOnly, admi
 
 // Admin: list all negative appeals
 router.get('/credits/negative/appeals', authMiddleware, adminOnly, adminListNegativeCreditAppeals);
+
+// Admin/OA: Re-open appeal window for a specific credit
+router.patch('/credits/negative/:creditId/reopen', authMiddleware, adminOrOA, adminReopenAppealWindow);
 
 // OA-only endpoint: get credits issued by the logged-in OA
 router.get('/oa/credits/issued', authMiddleware, adminOrOA, oaGetOwnIssuedCredits);

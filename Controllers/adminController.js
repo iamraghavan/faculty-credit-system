@@ -700,7 +700,7 @@ async function adminListNegativeCredits(req, res, next) {
       );
     }
 
-    // 6️⃣ Text search across multiple fields
+    // 6️⃣ Text search across multiple fields (optimized)
     if (search.trim()) {
       const q = search.toLowerCase();
       items = items.filter(it => {
@@ -709,6 +709,8 @@ async function adminListNegativeCredits(req, res, next) {
           it.notes,
           it.facultySnapshot?.name,
           it.facultySnapshot?.facultyID,
+          it.facultySnapshot?.college,
+          it.facultySnapshot?.department,
           it.creditTitle
         ];
         return fields.some(f => String(f || '').toLowerCase().includes(q));
@@ -732,16 +734,12 @@ async function adminListNegativeCredits(req, res, next) {
     const paged = items.slice(skip, skip + Math.max(Number(limit), 1));
 
     // 9️⃣ Enrich results with related info
-    // (Optional: can fetch faculty/title info dynamically)
     const formattedItems = paged.map(it => ({
       creditId: it._id,
-      // 🧑‍🏫 Faculty details
       facultyName: it.facultySnapshot?.name || '',
       facultyID: it.facultySnapshot?.facultyID || '',
       college: it.facultySnapshot?.college || '',
       department: it.facultySnapshot?.department || '',
-
-      // 🧾 Credit info
       templateTitle: it.creditTitle || '',
       title: it.title || '',
       type: it.type || '',
@@ -750,20 +748,18 @@ async function adminListNegativeCredits(req, res, next) {
       issuedBy: it.issuedBy || '',
       proofMeta: it.proofMeta || null,
       proofUrl: it.proofUrl || '',
-
-      // 📅 Timestamps
       createdAt: it.createdAt,
       updatedAt: it.updatedAt,
-
-      // keep all original fields if frontend still needs them
+      // Pass original raw fields as well
       ...it
     }));
-    // 🔹 Optional: Distinct filter options for frontend dropdowns
+
+    // 🔟 Extract distinct values for UI filters
     const distinctValues = {
-      templates: [...new Set(items.map(i => i.creditTitle).filter(Boolean))],
-      years: [...new Set(items.map(i => i.academicYear).filter(Boolean))],
-      colleges: [...new Set(items.map(i => i.facultySnapshot?.college).filter(Boolean))],
-      departments: [...new Set(items.map(i => i.facultySnapshot?.department).filter(Boolean))]
+      templates: [...new Set(items.map(i => i.creditTitle).filter(Boolean))].sort(),
+      years: [...new Set(items.map(i => i.academicYear).filter(Boolean))].sort(),
+      colleges: [...new Set(items.map(i => i.facultySnapshot?.college).filter(Boolean))].sort(),
+      departments: [...new Set(items.map(i => i.facultySnapshot?.department).filter(Boolean))].sort()
     };
 
     // ✅ Response
@@ -772,7 +768,7 @@ async function adminListNegativeCredits(req, res, next) {
       total,
       page: Number(page),
       limit: Number(limit),
-      filters: distinctValues, // new addition for UI dropdowns
+      filters: distinctValues,
       items: formattedItems
     });
   } catch (err) {
@@ -1630,6 +1626,47 @@ async function oaDeleteIssuedCredit(req, res, next) {
   }
 }
 
+/**
+ * Admin/OA re-opens the appeal window for a negative credit
+ * PATCH /api/v1/admin/credits/negative/:creditId/reopen
+ */
+async function adminReopenAppealWindow(req, res, next) {
+  try {
+    const { creditId } = req.params;
+    if (!creditId) return res.status(400).json({ success: false, message: 'creditId required' });
+
+    await ensureDb();
+    const credit = await Credit.findById(creditId);
+    if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
+    if (credit.type !== 'negative') {
+      return res.status(400).json({ success: false, message: 'Only negative credits can have appeals re-opened' });
+    }
+
+    const updates = {
+      overrideAppealWindow: true,
+      updatedAt: new Date().toISOString()
+    };
+
+    // Reset attempt count if it was at the limit
+    if ((credit.appealCount || 0) >= 2) {
+      updates.appealCount = 0;
+    }
+
+    await Credit.update(creditId, updates);
+    const updated = await Credit.findById(creditId);
+
+    emitSocket(req, 'credit:appeal:reopened', { creditId, facultyId: updated.faculty });
+
+    return res.json({ 
+      success: true, 
+      message: 'Appeal window has been re-opened for this faculty member.', 
+      data: updated 
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 
 module.exports = {
   createCreditTitle,
@@ -1649,5 +1686,6 @@ module.exports = {
   adminUpdateAppealStatus,
   getNegativeAppeals,
   oaGetOwnIssuedCredits,
-  oaDeleteIssuedCredit
+  oaDeleteIssuedCredit,
+  adminReopenAppealWindow
 };

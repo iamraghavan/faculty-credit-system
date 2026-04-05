@@ -28,6 +28,44 @@ async function ensureDb() {
 const { createMaskedUrl, createShortLink } = require('../utils/urlHelper');
 
 /**
+ * Helper to calculate appeal eligibility
+ */
+function getAppealEligibility(credit) {
+  if (credit.type !== 'negative') {
+    return { canAppeal: false, reason: 'Only negative credits can be appealed' };
+  }
+
+  // 1. Check attempt count
+  const currentAttempts = credit.appealCount || 0;
+  if (currentAttempts >= 2) {
+    return { canAppeal: false, reason: 'Maximum number of appeals (2) has been reached' };
+  }
+
+  // 2. Check for pending appeal
+  if (credit.appeal && credit.appeal.status === 'pending') {
+    return { canAppeal: false, reason: 'An appeal is already pending' };
+  }
+
+  // 3. Check time window
+  const windowDays = parseInt(process.env.APPEAL_WINDOW_DAYS || '14', 10);
+  const windowMs = windowDays * 24 * 60 * 60 * 1000;
+  const createdAt = new Date(credit.createdAt).getTime();
+  const now = Date.now();
+  
+  const isExpired = (now - createdAt) > windowMs;
+
+  if (isExpired && !credit.overrideAppealWindow) {
+    return { 
+      canAppeal: false, 
+      reason: `Appeal window (${windowDays} days) has expired`,
+      expiryDate: new Date(createdAt + windowMs).toISOString()
+    };
+  }
+
+  return { canAppeal: true };
+}
+
+/**
  * Faculty submits positive credit
  */
 async function submitPositiveCredit(req, res, next) {
@@ -391,13 +429,19 @@ async function getNegativeCredits(req, res, next) {
     const skip = (Math.max(Number(page), 1) - 1) * Math.max(Number(limit), 1);
     const paged = items.slice(skip, skip + Number(limit));
 
+    // Decorate with eligibility
+    const decorated = paged.map(it => ({
+      ...it,
+      appealEligibility: getAppealEligibility(it)
+    }));
+
     return res.json({
       success: true,
       total,
       page: Number(page),
       limit: Number(limit),
       filters: { academicYear: academicYear || 'All', status: status || 'All' },
-      items: paged,
+      items: decorated,
     });
   } catch (err) {
     console.error('getNegativeCredits error:', err);
@@ -428,12 +472,10 @@ async function appealNegativeCredit(req, res, next) {
     if (String(credit.faculty) !== String(faculty._id))
       return res.status(403).json({ success: false, message: 'Unauthorized' });
 
-    if (credit.appeal && credit.appeal.status === 'pending')
-      return res.status(400).json({ success: false, message: 'An appeal is already pending for this credit' });
-
-    const currentAttempts = credit.appealCount || 0;
-    if (currentAttempts >= 2)
-      return res.status(400).json({ success: false, message: 'Maximum number of appeals (2) has been reached' });
+    const eligible = getAppealEligibility(credit);
+    if (!eligible.canAppeal) {
+      return res.status(400).json({ success: false, message: eligible.reason, eligibility: eligible });
+    }
 
     let proofUrl, proofMeta;
     if (req.file) {
@@ -1043,7 +1085,13 @@ async function getSingleCredit(req, res, next) {
       return res.status(403).json({ success: false, message: 'Unauthorized access to this credit' });
     }
 
-    return res.json({ success: true, data: credit });
+    return res.json({ 
+      success: true, 
+      data: {
+        ...credit,
+        appealEligibility: getAppealEligibility(credit)
+      } 
+    });
   } catch (err) {
     next(err);
   }
