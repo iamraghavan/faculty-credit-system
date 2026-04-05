@@ -357,13 +357,21 @@ async function getNegativeCredits(req, res, next) {
   try {
     await ensureDb();
 
-    const faculty = req.user;
-    if (!faculty || faculty.role !== 'faculty')
+    const actor = req.user;
+    if (!actor || !['faculty', 'admin', 'oa'].includes(actor.role)) {
       return res.status(403).json({ success: false, message: 'Forbidden' });
+    }
 
-    const { page = 1, limit = 20, status, academicYear, sort = '-createdAt' } = req.query;
+    const { page = 1, limit = 20, status, academicYear, facultyId: queryId, sort = '-createdAt' } = req.query;
 
-    const filter = { faculty: String(faculty._id), type: 'negative' };
+    const filter = { type: 'negative' };
+
+    // If faculty, strictly force their own ID. If Admin/OA, optionally allow filtering by a specific facultyId.
+    if (actor.role === 'faculty') {
+      filter.faculty = String(actor._id);
+    } else if (queryId) {
+      filter.faculty = String(queryId);
+    }
 
     if (status && status.toLowerCase() !== 'all') filter.status = status.toLowerCase();
     if (academicYear && academicYear.toLowerCase() !== 'all') filter.academicYear = academicYear;
