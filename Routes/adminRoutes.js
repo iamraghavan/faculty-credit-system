@@ -103,7 +103,7 @@ router.put('/credits/negative/:creditId/appeal', authMiddleware, adminOnly, admi
 router.get('/credits/negative/appeals', authMiddleware, adminOnly, adminListNegativeCreditAppeals);
 
 // Admin/OA: Re-open appeal window for a specific credit
-router.patch('/credits/negative/:creditId/reopen', authMiddleware, adminOrOA, adminReopenAppealWindow);
+router.patch(['/credits/negative/:creditId/reopen', '/credits/credits/negative/:creditId/reopen'], authMiddleware, adminOrOA, adminReopenAppealWindow);
 
 // OA-only endpoint: get credits issued by the logged-in OA
 router.get('/oa/credits/issued', authMiddleware, adminOrOA, oaGetOwnIssuedCredits);
