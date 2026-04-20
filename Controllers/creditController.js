@@ -192,25 +192,6 @@ async function adminIssueNegativeCredit(req, res, next) {
 
     io.emit(`faculty:${faculty._id}:creditUpdate`, c);
 
-    // --- Trigger Notifications (Email + Push + WhatsApp) ---
-    try {
-      const issuerName = actor.name || 'Administrator';
-      const portalUrl = process.env.FRONTEND_URL ? `${process.env.FRONTEND_URL}/faculty/credits` : '#';
-
-      await sendRemarkNotificationHelper({
-        faculty,
-        title: ct.title,
-        points: pointsValue,
-        academicYear,
-        notes,
-        issuerName,
-        portalUrl
-      });
-    } catch (notifyErr) {
-      console.error('Failed to send remark notification:', notifyErr);
-      // Don't fail the request if notification fails, the record is already saved.
-    }
-
     return res.status(201).json({ success: true, data: c });
   } catch (err) {
     next(err);
