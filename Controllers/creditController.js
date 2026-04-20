@@ -12,6 +12,7 @@ const { recalcFacultyCredits } = require('../utils/calculateCredits');
 const io = require('../socket');
 const { connectDB } = require('../config/db');
 const { sendWhatsAppMessage } = require('../utils/whatsapp');
+const { sendRemarkNotificationHelper } = require('../utils/notificationHelper');
 
 /**
  * Helper: ensure DynamoDB client is connected
@@ -191,91 +192,23 @@ async function adminIssueNegativeCredit(req, res, next) {
 
     io.emit(`faculty:${faculty._id}:creditUpdate`, c);
 
-    // --- Prepare Notification (Email + PDF) ---
+    // --- Trigger Notifications (Email + Push + WhatsApp) ---
     try {
       const issuerName = actor.name || 'Administrator';
-      const dateStr = new Date().toLocaleDateString('en-IN', { dateStyle: 'long' });
       const portalUrl = process.env.FRONTEND_URL ? `${process.env.FRONTEND_URL}/faculty/credits` : '#';
 
-      // 1. Generate PDF
-      const pdfBuffer = await generateRemarkPdf({
+      await sendRemarkNotificationHelper({
+        faculty,
         title: ct.title,
         points: pointsValue,
         academicYear,
         notes,
-        facultyName: faculty.name,
-        facultyId: faculty.facultyID,
         issuerName,
-        date: dateStr
+        portalUrl
       });
-
-      // 2. Read HTML Template
-      const fsPromises = require('fs').promises;
-      const templatePath = path.resolve(process.cwd(), 'email-templates', 'remark-notification.html');
-      let htmlContent = await fsPromises.readFile(templatePath, 'utf8');
-
-      // 3. Replace Placeholders
-      htmlContent = htmlContent
-        .replace(/{{\s*facultyName\s*}}/g, faculty.name)
-        .replace(/{{\s*remarkTitle\s*}}/g, ct.title)
-        .replace(/{{\s*remarkPoints\s*}}/g, Math.abs(pointsValue)) // Show absolute value in HTML usually
-        .replace(/{{\s*remarkMessage\s*}}/g, notes || 'No additional notes provided.')
-        .replace(/{{\s*date\s*}}/g, dateStr)
-        .replace(/{{\s*issuerName\s*}}/g, issuerName)
-        .replace(/{{\s*portalUrl\s*}}/g, portalUrl)
-        .replace(/{{\s*currentYear\s*}}/g, new Date().getFullYear());
-
-      // 4. Send Email with Attachment
-      await sendEmail({
-        to: faculty.email,
-        subject: `Startling Alert - Remark Notification: ${ct.title}`,
-        text: `Remark Notification: ${ct.title}\nPoints: ${pointsValue}\nPlease check the attached PDF for details.`,
-        html: htmlContent,
-        attachments: [
-          {
-            filename: `Remark_Notification_${Date.now()}.pdf`,
-            content: pdfBuffer,
-            contentType: 'application/pdf'
-          }
-        ]
-      });
-
-      // 5. Send Web Push Notification
-      sendPushToUser(String(faculty._id), {
-        title: 'New Remark Received',
-        body: `${ct.title} (${pointsValue} credits). Check your portal.`,
-        url: portalUrl,
-        icon: '/icons/warning.png' // Ensure this exists on frontend public
-      });
-
-      // 6. Send WhatsApp Notification
-      if (faculty.whatsappNumber) {
-        const recalcResult = await recalcFacultyCredits(faculty._id);
-        const currentBalance = recalcResult.currentCredit;
-
-        await sendWhatsAppMessage({
-          phone: faculty.whatsappNumber,
-          templateName: 'fcs_negative_credit_alert_v1',
-          language: 'en',
-          textParams: [
-            faculty.name,           // {{faculty_name}}
-            Math.abs(pointsValue).toString(), // {{neg_credits}}
-            faculty.facultyID,      // {{faculty_id}}
-            faculty.department,     // {{dept}}
-            ct.title,               // {{activity}}
-            issuerName,             // {{issuer}}
-            notes || 'No reason specified', // {{reason}}
-            currentBalance.toString() // {{credit_balance}}
-          ],
-          buttonParams: [
-            String(faculty._id) // For the dynamic URL id={{1}}
-          ]
-        });
-      }
-
     } catch (notifyErr) {
       console.error('Failed to send remark notification:', notifyErr);
-      // Don't fail the request, just log
+      // Don't fail the request if notification fails, the record is already saved.
     }
 
     return res.status(201).json({ success: true, data: c });

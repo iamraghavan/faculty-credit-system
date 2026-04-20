@@ -16,6 +16,7 @@ module.exports = {
       ...data,
     };
     await client.send(new PutCommand({ TableName: TABLE, Item: item }));
+    console.log(`[Credit Model] Successfully stored credit entry: ${item._id} for faculty: ${item.faculty}`);
     return item;
   },
 
