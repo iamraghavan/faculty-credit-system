@@ -1,253 +1,200 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Official Remark Notification</title>
-    <style>
-        body {
-            margin: 0;
-            padding: 0;
-            -webkit-font-smoothing: antialiased;
-            background-color: #f4f6f9;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
-        }
-
-        .wrapper {
-            background-color: #f4f6f9;
-            padding: 20px;
-        }
-
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-            background-color: #ffffff;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            overflow: hidden;
-        }
-
-        .header-blue-bar {
-            background-color: #001b70;
-            height: 5px;
-        }
-
-        .content {
-            padding: 40px;
-            color: #374151;
-            line-height: 1.6;
-        }
-
-        .logo {
-            max-width: 12rem;
-            margin-bottom: 24px;
-        }
-
-        h1 {
-            font-size: 28px;
-            font-weight: 600;
-            color: #111827;
-            margin: 0 0 24px;
-        }
-
-        p {
-            margin: 0 0 16px;
-            font-size: 16px;
-        }
-
-        .summary-card {
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            margin: 32px 0;
-        }
-
-        .summary-card h2 {
-            margin: 0;
-            padding: 16px;
-            background-color: #f9fafb;
-            border-bottom: 1px solid #e5e7eb;
-            font-size: 16px;
-            font-weight: 600;
-            color: #111827;
-        }
-
-        .summary-table {
-            width: 100%;
-            padding: 8px 16px;
-        }
-
-        .summary-table td {
-            padding: 12px 0;
-            vertical-align: top;
-            font-size: 14px;
-            border-bottom: 1px solid #f3f4f6;
-        }
-
-        .summary-table tr:last-child td {
-            border-bottom: none;
-        }
-
-        .summary-table .label {
-            color: #6b7280;
-            font-weight: 500;
-            width: 40%;
-        }
-
-        .summary-table .value {
-            color: #111827;
-            font-weight: 500;
-        }
-
-        .points {
-            font-weight: 700;
-            color: #dc2626;
-        }
-
-        .notes-section {
-            background-color: #f9fafb;
-            padding: 16px;
-            border-radius: 6px;
-            border: 1px dashed #d1d5db;
-            margin: 24px 0;
-        }
-
-        .notes-section h3 {
-            margin: 0 0 10px;
-            font-size: 16px;
-            font-weight: 600;
-            color: #111827;
-        }
-
-        .notes-section p {
-            margin: 0;
-            font-size: 14px;
-            font-style: italic;
-        }
-
-        .button-container {
-            text-align: center;
-            margin: 32px 0;
-        }
-
-        .button {
-            display: inline-block;
-            background-color: #001b70;
-            color: #ffffff;
-            padding: 14px 28px;
-            border-radius: 6px;
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 16px;
-        }
-
-        .separator {
-            border: none;
-            border-top: 1px solid #e5e7eb;
-            margin: 32px 0;
-        }
-
-        .footer-text {
-            font-size: 14px;
-            color: #6b7280;
-            text-align: center;
-        }
-
-        .footer-text a {
-            color: #001b70;
-            text-decoration: none;
-            font-weight: 500;
-        }
-
-        .final-footer {
-            padding: 24px;
-            text-align: center;
-            font-size: 12px;
-            color: #9ca3af;
-        }
-
-        .final-footer p {
-            margin: 0 0 5px;
-        }
-
-        .final-footer a {
-            color: #6b7280;
-            text-decoration: none;
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Official Remark Notification</title>
 </head>
 
-<body>
-    <div class="wrapper">
-        <div class="container">
-            <div class="header-blue-bar"></div>
-            <div class="content">
-                <img src="https://egspgroup.in/assets/egspgoi___logo.webp"
-                    alt="E.G.S. Pillay Group of Institutions Logo" class="logo">
-                <h1>Official Remark Recorded</h1>
-                <p>Dear {{facultyName}},</p>
-                <p>An official remark has been recorded on your faculty profile. A detailed PDF report is attached to
-                    this email for your reference and records.</p>
+<body style="margin:0; padding:0; background-color:#f4f4f4; font-family:Arial, sans-serif;">
 
-                <div class="summary-card">
-                    <h2>Remark Summary</h2>
-                    <table class="summary-table" width="100%" cellpadding="0" cellspacing="0">
-                        <tr>
-                            <td class="label">Faculty Name</td>
-                            <td class="value">{{facultyName}}</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Faculty ID</td>
-                            <td class="value">{{facultyID}}</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Academic Year</td>
-                            <td class="value">{{academicYear}}</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Date Issued</td>
-                            <td class="value">{{date}}</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Issued By</td>
-                            <td class="value">{{issuerName}}</td>
-                        </tr>
-                        <tr>
-                            <td class="label">Credit Deduction</td>
-                            <td class="value points">{{remarkPoints}} Points</td>
-                        </tr>
-                    </table>
-                </div>
+<table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f4; padding:20px 0;">
+<tr>
+<td align="center">
 
-                <div class="notes-section">
-                    <h3>Administrator's Notes</h3>
-                    <p>{{remarkMessage}}</p>
-                </div>
+<!-- Main Container -->
+<table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff; border-radius:8px; overflow:hidden; border:1px solid #e0e0e0;">
 
-                <p>If you believe this remark was issued in error, you may submit an appeal through the faculty portal
-                    within the allowed timeframe.</p>
+<!-- Top Bar -->
+<tr>
+<td style="background:#0f62fe; height:6px;"></td>
+</tr>
 
-                <div class="button-container">
-                    <a href="{{portalUrl}}" class="button">View Details & Submit Appeal</a>
-                </div>
+<!-- Content -->
+<tr>
+<td style="padding:32px; color:#161616;">
 
-                <hr class="separator">
+<img src="https://egspgroup.in/assets/egspgoi___logo.webp" width="150" style="margin-bottom:24px;">
 
-                <div class="footer-text">
-                    Having trouble? <a href="mailto:web@egspec.org">Contact our support team</a>.
-                    <p style="margin-top: 16px; font-size: 14px; color: #6b7280;">Regards,<br>The CreditWise Team</p>
-                </div>
-            </div>
-        </div>
-        <div class="final-footer">
-            <p>&copy; {{currentYear}} E.G.S. Pillay Group of Institutions. All rights reserved.</p>
-            <p>Nagapattinam - 611002, Tamil Nadu, India</p>
-            <p>
-                <a href="#">Help Center</a> &bull; <a href="#">Privacy Policy</a>
-            </p>
-            <p><a href="_unsubscribe" class="">Unsubscribe</a></p>
-        </div>
-    </div>
+<h1 style="margin:0 0 20px; font-size:24px; font-weight:600;">
+Official Remark Recorded
+</h1>
+
+<p style="font-size:15px; margin:0 0 16px;">
+Dear {{facultyName}},
+</p>
+
+<p style="font-size:15px; margin:0 0 24px; color:#525252;">
+An official remark has been recorded on your faculty profile. Please refer to the attached report for complete details.
+</p>
+
+<!-- Summary Card -->
+<table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e0e0e0; border-radius:6px; overflow:hidden; margin-bottom:24px;">
+
+<tr>
+<td style="background:#f4f4f4; padding:12px 16px; font-weight:600; font-size:14px;">
+Remark Summary
+</td>
+</tr>
+
+<tr><td style="padding:16px;">
+
+<table width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;">
+
+<tr>
+<td style="color:#6f6f6f; padding:8px 0;">Faculty Name</td>
+<td style="font-weight:500;">{{facultyName}}</td>
+</tr>
+
+<tr>
+<td style="color:#6f6f6f; padding:8px 0;">Faculty ID</td>
+<td>{{facultyID}}</td>
+</tr>
+
+<tr>
+<td style="color:#6f6f6f; padding:8px 0;">Academic Year</td>
+<td>{{academicYear}}</td>
+</tr>
+
+<tr>
+<td style="color:#6f6f6f; padding:8px 0;">Date Issued</td>
+<td>{{date}}</td>
+</tr>
+
+<tr>
+<td style="color:#6f6f6f; padding:8px 0;">Issued By</td>
+<td>{{issuerName}}</td>
+</tr>
+
+<tr>
+<td style="color:#6f6f6f; padding:8px 0;">Credit Deduction</td>
+<td style="color:#da1e28; font-weight:600;">
+{{remarkPoints}} Points
+</td>
+</tr>
+
+</table>
+
+</td></tr>
+</table>
+
+<!-- Notes -->
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f4; border-left:4px solid #0f62fe; margin-bottom:24px;">
+<tr>
+<td style="padding:16px;">
+<strong style="display:block; margin-bottom:6px;">Administrator's Notes</strong>
+<span style="font-size:14px; color:#525252;">
+{{remarkMessage}}
+</span>
+</td>
+</tr>
+</table>
+
+<p style="font-size:14px; color:#525252;">
+If you believe this remark was issued in error, you may submit an appeal through the faculty portal within the allowed timeframe.
+</p>
+
+<!-- CTA Button -->
+<table cellpadding="0" cellspacing="0" align="center" style="margin:28px auto;">
+<tr>
+<td align="center" bgcolor="#0f62fe" style="border-radius:4px;">
+<a href="{{portalUrl}}" style="display:inline-block; padding:12px 24px; color:#ffffff; text-decoration:none; font-weight:600; font-size:14px;">
+View Details & Submit Appeal
+</a>
+</td>
+</tr>
+</table>
+
+</td>
+</tr>
+
+</table>
+
+<!-- Improved Footer -->
+<table width="600" cellpadding="0" cellspacing="0" style="margin-top:20px; background:#f4f4f4; border-top:1px solid #e0e0e0; font-size:13px; color:#6f6f6f;">
+<tr>
+<td style="padding:24px;">
+
+<table width="100%" cellpadding="0" cellspacing="0">
+
+<tr>
+
+<!-- Left -->
+<td valign="top" style="width:50%; padding-right:10px;">
+
+<strong style="display:block; font-size:14px; color:#161616; margin-bottom:6px;">
+CreditWise
+</strong>
+
+<span style="line-height:1.5;">
+E.G.S. Pillay Group of Institutions<br>
+Nagapattinam - 611002<br>
+Tamil Nadu, India
+</span>
+
+<!-- Social Icons -->
+<table cellpadding="0" cellspacing="0" style="margin-top:12px;">
+<tr>
+
+<td style="padding-right:10px;">
+<a href="#"><img src="https://cdn-icons-png.flaticon.com/512/733/733547.png" width="20"></a>
+</td>
+
+<td style="padding-right:10px;">
+<a href="#"><img src="https://cdn-icons-png.flaticon.com/512/733/733646.png" width="20"></a>
+</td>
+
+<td>
+<a href="#"><img src="https://cdn-icons-png.flaticon.com/512/733/733561.png" width="20"></a>
+</td>
+
+</tr>
+</table>
+
+</td>
+
+<!-- Right -->
+<td valign="top" style="width:50%; text-align:right; padding-left:10px;">
+
+<span style="display:block; line-height:1.5;">
+You received this email because you are registered with CreditWise.
+</span>
+
+<a href="_unsubscribe" style="display:inline-block; margin-top:12px; color:#0f62fe; text-decoration:none; font-weight:500;">
+Unsubscribe
+</a>
+
+</td>
+
+</tr>
+</table>
+
+<!-- Bottom -->
+<table width="100%" style="margin-top:20px;">
+<tr>
+<td style="font-size:12px; color:#8d8d8d; text-align:center;">
+© {{currentYear}} CreditWise. All rights reserved.
+</td>
+</tr>
+</table>
+
+</td>
+</tr>
+</table>
+
+</td>
+</tr>
+</table>
+
 </body>
-
 </html>
