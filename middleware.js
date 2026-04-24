@@ -23,8 +23,13 @@ function ipInCIDR(ip, cidr) {
 
 export default function middleware(request) {
   // 1. Get Geo Information and IP
-  const country = request.geo?.country || request.headers.get('x-vercel-ip-country');
+  const country = request.headers.get('x-vercel-ip-country') || request.geo?.country;
+  const city = request.headers.get('x-vercel-ip-city');
+  const state = request.headers.get('x-vercel-ip-country-region');
   const ip = request.headers.get('x-forwarded-for')?.split(',')[0].trim() || '0.0.0.0';
+
+  // Log visitor details for monitoring
+  console.log(`Visitor: IP ${ip}, Country ${country}, State ${state}, City ${city}`);
 
   // 2. Whitelist Check (AWS Mumbai ap-south-1)
   const isWhitelisted = WHITELISTED_RANGES.some(range => 
@@ -32,8 +37,14 @@ export default function middleware(request) {
   );
 
   if (isWhitelisted) {
-    console.info(`Whitelisted request from AWS Mumbai IP: ${ip}`);
-    return new Response(null, { headers: { 'x-middleware-next': '1' } });
+    console.info(`Whitelisted request from AWS Mumbai IP: ${ip} (${city}, ${state})`);
+    return new Response(null, { 
+      headers: { 
+        'x-middleware-next': '1',
+        'x-visitor-city': city || 'Unknown',
+        'x-visitor-state': state || 'Unknown'
+      } 
+    });
   }
 
   // 3. Geo-block logic: Allow ONLY India (IN)
@@ -56,6 +67,8 @@ export default function middleware(request) {
   return new Response(null, {
     headers: {
       'x-middleware-next': '1',
+      'x-visitor-city': city || 'Unknown',
+      'x-visitor-state': state || 'Unknown'
     },
   });
 }
