@@ -5,7 +5,8 @@
 const WHITELISTED_RANGES = [
   { ip: '52.66.193.64', mask: 27 },
   { ip: '13.126.0.0', mask: 15 },
-  { ip: '13.234.0.0', mask: 16 }
+  { ip: '13.234.0.0', mask: 16 },
+  { ip: '104.155.0.0', mask: 16 } // Google Cloud Workstations (Taiwan)
 ];
 
 /**
@@ -47,8 +48,9 @@ export default function middleware(request) {
     });
   }
 
-  // 3. Geo-block logic: Allow ONLY India (IN)
-  if (country && country !== 'IN') {
+  // 3. Geo-block logic: Allow ONLY India (IN) and Taiwan (TW) for Development
+  const ALLOWED_COUNTRIES = ['IN', 'TW'];
+  if (country && !ALLOWED_COUNTRIES.includes(country)) {
     console.warn(`Blocked request from ${country}`);
     return new Response(
       JSON.stringify({ 
