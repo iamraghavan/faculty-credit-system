@@ -7,6 +7,7 @@ const morgan = require('morgan');
 const mongoSanitize = require('express-mongo-sanitize');
 
 const rateLimitMiddleware = require('./Middleware/rateLimitMiddleware');
+const ipIntelligenceMiddleware = require('./Middleware/ipIntelligenceMiddleware');
 const { errorHandler } = require('./Middleware/errorMiddleware');
 
 // Routes
@@ -42,6 +43,9 @@ if (process.env.NODE_ENV !== 'production') {
 
 // Health route
 app.use(healthRouter);
+
+// IP Intelligence (Geo-blocking is at Edge, VPN/Datacenter here)
+app.use(ipIntelligenceMiddleware);
 
 // Rate limiting
 app.use(rateLimitMiddleware);
