@@ -423,7 +423,7 @@ async function appealNegativeCredit(req, res, next) {
     await Credit.update(creditId, {
       appeal: appealObj,
       status: 'appealed',
-      appealCount: currentAttempts + 1,
+      appealCount: (credit.appealCount || 0) + 1,
       updatedAt: new Date().toISOString(),
     });
 
