@@ -249,13 +249,22 @@ async function listCreditsForFaculty(req, res, next) {
     // Optionally populate some fields using User model for issuedBy or faculty snapshots are already present
     // Keep payload lean: we return the items as-is (they include facultySnapshot), but you can expand here if needed.
 
+    // Decorate with eligibility
+    const decorated = paged.map(it => {
+      const itObj = it.toObject ? it.toObject() : it;
+      return {
+        ...itObj,
+        appealEligibility: getAppealEligibility(itObj)
+      };
+    });
+
     return res.json({
       success: true,
       total,
       page: Number(page),
       limit: Number(limit),
       filters: { academicYear: academicYear || 'All', status: status || 'All' },
-      items: paged,
+      items: decorated,
     });
   } catch (err) {
     console.error('listCreditsForFaculty error:', err);
@@ -485,6 +494,16 @@ async function getNegativeCreditsByFacultyId(req, res, next) {
     const skip = (Math.max(Number(page), 1) - 1) * Math.max(Number(limit), 1);
     const paged = items.slice(skip, skip + Number(limit));
 
+    // Decorate with eligibility
+    const decorated = paged.map(it => {
+      // For mongoose docs vs plain objects
+      const itObj = it.toObject ? it.toObject() : it;
+      return {
+        ...itObj,
+        appealEligibility: getAppealEligibility(itObj)
+      };
+    });
+
     return res.json({
       success: true,
       total,
@@ -494,7 +513,7 @@ async function getNegativeCreditsByFacultyId(req, res, next) {
         academicYear: academicYear || 'All',
         status: status || 'All',
       },
-      items: paged,
+      items: decorated,
     });
   } catch (err) {
     console.error('getNegativeCreditsByFacultyId error:', err);
