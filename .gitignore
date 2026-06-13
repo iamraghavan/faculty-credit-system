@@ -2,3 +2,7 @@
 /node_modules
 /faculty-credit-api_accessKeys.csv
 .vercel
+
+# Jest testing
+coverage/
+.jest-cache/

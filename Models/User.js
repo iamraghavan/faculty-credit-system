@@ -58,12 +58,37 @@ module.exports = {
    */
   async find(filter = {}) {
     const client = getDynamoClient();
-    const res = await client.send(new ScanCommand({ TableName: TABLE }));
-    const items = res.Items || [];
+    const params = { TableName: TABLE };
 
-    return items.filter((u) =>
-      Object.entries(filter).every(([k, v]) => u[k] === v)
-    );
+    const filterKeys = Object.keys(filter);
+    if (filterKeys.length > 0) {
+      const filterExps = [];
+      const expNames = {};
+      const expValues = {};
+
+      filterKeys.forEach((k) => {
+        expNames[`#${k}`] = k;
+        expValues[`:${k}`] = filter[k];
+        filterExps.push(`#${k} = :${k}`);
+      });
+
+      params.FilterExpression = filterExps.join(' AND ');
+      params.ExpressionAttributeNames = expNames;
+      params.ExpressionAttributeValues = expValues;
+    }
+
+    const items = [];
+    let lastEvaluatedKey = undefined;
+    do {
+      params.ExclusiveStartKey = lastEvaluatedKey;
+      const res = await client.send(new ScanCommand(params));
+      if (res.Items) {
+        items.push(...res.Items);
+      }
+      lastEvaluatedKey = res.LastEvaluatedKey;
+    } while (lastEvaluatedKey);
+
+    return items;
   },
 
   /**
