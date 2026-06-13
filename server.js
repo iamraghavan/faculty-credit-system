@@ -22,6 +22,9 @@ const reportRoutes = require('./Routes/reportRoutes');
 const healthRouter = require('./Routes/health');
 const analyticsRouter = require('./Routes/analyticsRoutes');
 
+const swaggerUi = require('swagger-ui-express');
+const swaggerDocument = require('./swagger.json');
+
 const app = express();
 
 // 👇 Trust proxy for Vercel / other serverless providers
@@ -111,6 +114,8 @@ app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/analytics', analyticsRouter);
 app.use('/api/v1/search', searchRoutes);
 app.use('/api/v1/reports', reportRoutes);
+
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 // CDN & Shortener Routes
 const cdnRoutes = require('./Routes/cdnRoutes');
