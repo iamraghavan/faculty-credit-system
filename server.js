@@ -35,7 +35,9 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Security & sanitization
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: false // Disable CSP so Swagger UI CDNs can load on Vercel
+}));
 app.use(cors());
 // app.use(mongoSanitize());
 
@@ -115,7 +117,15 @@ app.use('/api/v1/analytics', analyticsRouter);
 app.use('/api/v1/search', searchRoutes);
 app.use('/api/v1/reports', reportRoutes);
 
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+const swaggerOptions = {
+  customCssUrl: 'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.15.5/swagger-ui.min.css',
+  customJs: [
+    'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.15.5/swagger-ui-bundle.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.15.5/swagger-ui-standalone-preset.js'
+  ]
+};
+
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument, swaggerOptions));
 
 // CDN & Shortener Routes
 const cdnRoutes = require('./Routes/cdnRoutes');
