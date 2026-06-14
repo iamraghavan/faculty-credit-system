@@ -50,8 +50,8 @@ async function sendFcmNotification(token, payload) {
         data: payload.data || {},
         android: {
             notification: {
-                icon: payload.icon || 'stock_ticker_update',
-                color: '#7e57c2'
+                color: '#7e57c2',
+                channelId: 'high_importance_channel'
             }
         },
         webpush: {

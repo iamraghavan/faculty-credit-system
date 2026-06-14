@@ -6,3 +6,6 @@
 # Jest testing
 coverage/
 .jest-cache/
+
+setup_env.js
+/setup_env.js
