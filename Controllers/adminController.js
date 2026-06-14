@@ -11,6 +11,7 @@ const { recalcFacultyCredits } = require('../utils/calculateCredits');
 const { handleFileUpload } = require('../utils/fileUpload');
 const { connectDB } = require('../config/db');
 const { sendEmail } = require('../utils/email');
+const { sendPushToUser } = require('./pushController');
 
 /**
  * Ensure DynamoDB client is connected
@@ -601,6 +602,20 @@ async function updatePositiveCreditStatus(req, res, next) {
 
     emitSocket(req, 'credit:positive:update', { credit: updated });
 
+    if (status === 'approved') {
+      sendPushToUser(String(faculty._id), {
+        title: 'Credit Approved',
+        body: `Your credit submission "${updated.title}" has been approved.`,
+        url: '/u/credits'
+      });
+    } else if (status === 'rejected') {
+      sendPushToUser(String(faculty._id), {
+        title: 'Credit Rejected',
+        body: `Your credit submission "${updated.title}" was rejected.`,
+        url: '/u/credits'
+      });
+    }
+
     return res.json({ success: true, data: updated });
   } catch (err) {
     next(err);
@@ -1110,6 +1125,20 @@ async function adminUpdateAppealStatus(req, res, next) {
 
     // Emit socket event if needed
     emitSocket(req, 'credit:appeal:update', { creditId: updated._id, appeal: updated.appeal });
+
+    if (status === 'accepted') {
+      sendPushToUser(String(credit.faculty), {
+        title: 'Appeal Accepted',
+        body: `Your appeal for "${credit.title}" has been accepted.`,
+        url: '/u/credits'
+      });
+    } else if (status === 'rejected') {
+      sendPushToUser(String(credit.faculty), {
+        title: 'Appeal Rejected',
+        body: `Your appeal for "${credit.title}" was rejected.`,
+        url: '/u/credits'
+      });
+    }
 
     return res.json({ success: true, data: updated });
   } catch (err) {

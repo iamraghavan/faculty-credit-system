@@ -192,6 +192,14 @@ async function adminIssueNegativeCredit(req, res, next) {
 
     io.emit(`faculty:${faculty._id}:creditUpdate`, c);
 
+    // Send Push Notification
+    sendPushToUser(String(faculty._id), {
+      title: 'Negative Credit Issued',
+      body: `You have received a negative credit: "${c.title}" for ${Math.abs(pointsValue)} points.`,
+      url: '/u/credits',
+      icon: '/icons/warning.png'
+    });
+
     return res.status(201).json({ success: true, data: c });
   } catch (err) {
     next(err);
