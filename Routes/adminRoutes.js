@@ -37,6 +37,7 @@ const {
 
 
 const { authMiddleware, adminOnly, adminOrOA } = require('../Middleware/authMiddleware');
+const { getFacultyLedger, exportFacultyLedger } = require('../Controllers/facultyLedgerController');
 
 // Configure multer to use memory storage (serverless-safe)
 const upload = multer({
@@ -109,6 +110,10 @@ router.patch(['/credits/negative/:creditId/reopen', '/credits/credits/negative/:
 router.get('/oa/credits/issued', authMiddleware, adminOrOA, oaGetOwnIssuedCredits);
 
 router.delete('/oa/credits/issued/:id', authMiddleware, adminOrOA, oaDeleteIssuedCredit);
+
+// Admin: individual faculty credit ledger and professional-detail exports
+router.get('/faculty/:facultyId/credit-ledger', authMiddleware, adminOnly, getFacultyLedger);
+router.get('/faculty/:facultyId/credit-ledger/export', authMiddleware, adminOnly, exportFacultyLedger);
 
 
 module.exports = router;

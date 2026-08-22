@@ -1,4 +1,8 @@
 const ensureWhatsappVerified = (req, res, next) => {
+    // Temporarily disabled by default. Set ENFORCE_WHATSAPP_VERIFICATION=true to restore enforcement.
+    if (process.env.ENFORCE_WHATSAPP_VERIFICATION !== 'true') {
+        return next();
+    }
     if (!req.user) {
         return res.status(401).json({ success: false, message: 'Unauthorized' });
     }
