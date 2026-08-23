@@ -1,6 +1,7 @@
 const PDFDocument = require('pdfkit');
-const XLSX = require('xlsx');
+const ExcelJS = require('exceljs');
 const path = require('path');
+const { addExcelVerificationSheet, addPdfVerification } = require('./exportVerification');
 
 /**
  * Generate Excel Report Buffer
@@ -8,8 +9,10 @@ const path = require('path');
  * @param {Object} metadata - { level, title, date, generatedBy }
  * @returns {Buffer}
  */
-function createExcelReport(data, metadata, view = 'transactions') {
-  const wb = XLSX.utils.book_new();
+async function createExcelReport(data, metadata, view = 'transactions', verification) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'EGSPGOI Faculty Credit System';
+  wb.created = new Date(verification.issuedAt);
 
   // 1. Summary Sheet
   const summaryData = [
@@ -22,8 +25,10 @@ function createExcelReport(data, metadata, view = 'transactions') {
     [],
     ['Note', 'This report is computer generated from the Faculty Credit System.']
   ];
-  const summaryWs = XLSX.utils.aoa_to_sheet(summaryData);
-  XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary');
+  const summaryWs = wb.addWorksheet('Summary');
+  summaryData.forEach(row => summaryWs.addRow(row));
+  summaryWs.columns = [{ width: 28 }, { width: 60 }];
+  summaryWs.getCell('A1').font = { bold: true };
 
   // 2. Data Sheet
   let details;
@@ -50,10 +55,18 @@ function createExcelReport(data, metadata, view = 'transactions') {
       'Date': new Date(item.createdAt).toLocaleDateString()
     }));
   }
-  const detailsWs = XLSX.utils.json_to_sheet(details);
-  XLSX.utils.book_append_sheet(wb, detailsWs, view === 'ranking' ? 'Ranking' : 'Details');
-
-  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const detailsWs = wb.addWorksheet(view === 'ranking' ? 'Ranking' : 'Details');
+  if (details.length) {
+    detailsWs.columns = Object.keys(details[0]).map(header => ({ header, key: header, width: 24 }));
+    details.forEach(row => detailsWs.addRow(row));
+    detailsWs.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    detailsWs.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF001B70' } };
+    detailsWs.views = [{ state: 'frozen', ySplit: 1 }];
+  } else {
+    detailsWs.addRow(['No records matched the selected report filters.']);
+  }
+  await addExcelVerificationSheet(wb, verification);
+  return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
 /**
@@ -62,7 +75,7 @@ function createExcelReport(data, metadata, view = 'transactions') {
  * @param {Object} metadata - { level, title, date, generatedBy }
  * @returns {Promise<Buffer>}
  */
-function createPdfReport(data, metadata, view = 'transactions') {
+function createPdfReport(data, metadata, view = 'transactions', verification) {
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({ 
@@ -215,6 +228,7 @@ function createPdfReport(data, metadata, view = 'transactions') {
         rowY += rowHeight;
       });
 
+      addPdfVerification(doc, verification);
       doc.end();
     } catch (err) { reject(err); }
   });

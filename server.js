@@ -19,6 +19,7 @@ const conversationRoutes = require('./Routes/conversations');
 const notificationRoutes = require('./Routes/notificationRoutes');
 const searchRoutes = require('./Routes/searchRoutes');
 const reportRoutes = require('./Routes/reportRoutes');
+const exportVerificationRoutes = require('./Routes/exportVerificationRoutes');
 const healthRouter = require('./Routes/health');
 const analyticsRouter = require('./Routes/analyticsRoutes');
 
@@ -116,6 +117,7 @@ app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/analytics', analyticsRouter);
 app.use('/api/v1/search', searchRoutes);
 app.use('/api/v1/reports', reportRoutes);
+app.use('/api/v1/exports', exportVerificationRoutes);
 
 const swaggerOptions = {
   customCssUrl: 'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.15.5/swagger-ui.min.css',

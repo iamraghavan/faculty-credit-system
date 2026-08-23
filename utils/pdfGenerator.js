@@ -1,11 +1,18 @@
 const PDFDocument = require('pdfkit');
+const { createExportVerification, addPdfVerification } = require('./exportVerification');
 
 /**
  * Generate a PDF for a Remark Notification
  * @param {Object} data - { title, points, academicYear, notes, facultyName, facultyId, issuerName, date }
  * @returns {Promise<Buffer>}
  */
-function generateRemarkPdf(data) {
+async function generateRemarkPdf(data) {
+    const verification = await createExportVerification({
+        documentType: 'official_remark_notification',
+        subject: { facultyId: data.facultyId || null, facultyName: data.facultyName || null },
+        totals: { creditImpact: Number(data.points) || 0 },
+        content: data,
+    });
     return new Promise((resolve, reject) => {
         try {
             const doc = new PDFDocument({ margin: 50, size: 'A4' });
@@ -99,11 +106,13 @@ function generateRemarkPdf(data) {
 
             doc.moveDown(4);
 
+            addPdfVerification(doc, verification);
+
             // --- Footer / Disclaimer ---
             doc
                 .fontSize(10)
                 .fillColor('#666666')
-                .text('This is a computer-generated document. No signature is required.', { align: 'center' });
+                .text('This computer-generated document includes a cryptographic verification signature.', { align: 'center' });
 
             doc.end();
 

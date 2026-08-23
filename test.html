@@ -13,12 +13,12 @@
     import { getMessaging, getToken } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js";
 
     const firebaseConfig = {
-      apiKey: "AIzaSyBCT1UJcwqjKdsXL-6N_7qqa3lZRdAsqoE",
-      authDomain: "gitdrive-m4hfj.firebaseapp.com",
-      projectId: "gitdrive-m4hfj",
-      storageBucket: "gitdrive-m4hfj.firebasestorage.app",
-      messagingSenderId: "471156925064",
-      appId: "1:471156925064:web:0bd4f67ad521b9a3d9b53d"
+      apiKey: "REPLACE_AT_RUNTIME",
+      authDomain: "REPLACE_AT_RUNTIME",
+      projectId: "REPLACE_AT_RUNTIME",
+      storageBucket: "REPLACE_AT_RUNTIME",
+      messagingSenderId: "REPLACE_AT_RUNTIME",
+      appId: "REPLACE_AT_RUNTIME"
     };
 
     const app = initializeApp(firebaseConfig);
@@ -37,7 +37,7 @@
         }
 
         const token = await getToken(messaging, {
-          vapidKey: "BDQEZLqUGJepg0JgR9t-jpI5256vAniU6O_hJEKe4Tr55qqBvlYmsat_VEHdts5IPK_llAajDoV6PxmflvYOxjA"
+          vapidKey: "REPLACE_AT_RUNTIME"
         });
 
         output.textContent = token;

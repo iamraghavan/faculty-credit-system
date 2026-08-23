@@ -2,6 +2,7 @@ const Credit = require('../Models/Credit');
 const User = require('../Models/User');
 const { createExcelReport, createPdfReport, createHtmlReport } = require('../utils/reportUtils');
 const { createShortLink } = require('../utils/urlHelper');
+const { createExportVerification } = require('../utils/exportVerification');
 
 /**
  * Get Report Data (JSON)
@@ -166,6 +167,19 @@ async function downloadReport(req, res, next) {
       generatedBy: req.user?.name || 'Administrative System'
     };
 
+    const verificationTotals = view === 'ranking'
+      ? {
+          faculty: data.length,
+          positive: data.reduce((sum, item) => sum + (Number(item.positive) || 0), 0),
+          negative: data.reduce((sum, item) => sum + (Number(item.negative) || 0), 0),
+          net: data.reduce((sum, item) => sum + (Number(item.total) || 0), 0),
+        }
+      : {
+          records: data.length,
+          positive: data.filter(item => item.type === 'positive').reduce((sum, item) => sum + Math.abs(Number(item.points) || 0), 0),
+          negative: data.filter(item => item.type === 'negative').reduce((sum, item) => sum + Math.abs(Number(item.points) || 0), 0),
+        };
+
     // Shareable Link logic
     if (share === 'true') {
       const queryParams = new URLSearchParams(req.query);
@@ -186,8 +200,15 @@ async function downloadReport(req, res, next) {
     let contentType;
     let ext = format === 'excel' ? 'xlsx' : (format === 'html' ? 'html' : 'pdf');
 
+    const verification = format === 'html' ? null : await createExportVerification({
+      documentType: view === 'ranking' ? 'faculty_credit_ranking_report' : 'faculty_credit_transaction_report',
+      subject: { scope: metadata.level, scopeId: id || null },
+      totals: verificationTotals,
+      content: { data, metadata, view },
+    });
+
     if (format === 'excel') {
-      buffer = createExcelReport(data, metadata, view);
+      buffer = await createExcelReport(data, metadata, view, verification);
       contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     } else if (format === 'html') {
       // Helper to build download links for buttons
@@ -207,12 +228,16 @@ async function downloadReport(req, res, next) {
       const html = createHtmlReport(data, metadata, { pdf: pdfUrl, excel: excelUrl }, view);
       return res.send(html);
     } else {
-      buffer = await createPdfReport(data, metadata, view);
+      buffer = await createPdfReport(data, metadata, view, verification);
       contentType = 'application/pdf';
     }
 
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `attachment; filename="FCS_Report_${level || 'Global'}_${Date.now()}.${ext}"`);
+    if (verification) {
+      res.setHeader('X-FCS-Document-ID', verification.documentId);
+      res.setHeader('X-FCS-Content-SHA256', verification.contentHash);
+    }
     res.send(buffer);
 
   } catch (err) {

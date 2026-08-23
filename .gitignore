@@ -1,6 +1,14 @@
-/.env
+.env*
+!.env.example
 /node_modules
-/faculty-credit-api_accessKeys.csv
+*.pem
+*.key
+*.p12
+*.pfx
+*service-account*.json
+*credentials*.json
+*accessKeys*.csv
+firebase-adminsdk*.json
 .vercel
 
 # Jest testing

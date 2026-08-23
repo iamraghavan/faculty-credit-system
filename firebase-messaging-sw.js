@@ -1,13 +1,13 @@
 importScripts("https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js");
 
-firebase.initializeApp({
-  apiKey: "AIzaSyBCT1UJcwqjKdsXL-6N_7qqa3lZRdAsqoE",
-  authDomain: "gitdrive-m4hfj.firebaseapp.com",
-  projectId: "gitdrive-m4hfj",
-  messagingSenderId: "471156925064",
-  appId: "1:471156925064:web:0bd4f67ad521b9a3d9b53d"
-});
+// Legacy test worker: configure a generated deployment copy instead of
+// committing project configuration or API keys to source control.
+const firebaseConfig = self.FIREBASE_CONFIG;
+if (!firebaseConfig) {
+  throw new Error('Firebase messaging worker is not configured.');
+}
+firebase.initializeApp(firebaseConfig);
 
 const messaging = firebase.messaging();
 

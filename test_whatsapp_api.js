@@ -3,9 +3,13 @@ const axios = require('axios');
 async function testWhatsApp() {
     const url = 'https://api.tryowbot.com/sender';
 
+    if (!process.env.WHATSAPP_TOKEN || !process.env.WHATSAPP_TEST_PHONE) {
+        throw new Error('WHATSAPP_TOKEN and WHATSAPP_TEST_PHONE are required.');
+    }
+
     const payload = {
-        "token": "0ifvM74inCFqoFm9Hqi2Gx4taWzAY6VZLwvuo6ur7a7f4030",
-        "phone": "919942502245",
+        "token": process.env.WHATSAPP_TOKEN,
+        "phone": process.env.WHATSAPP_TEST_PHONE,
         "template_name": "egspgoi_faculty_credit_system_otp_verify",
         "template_language": "en_US",
 
