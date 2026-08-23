@@ -1,5 +1,7 @@
 const PDFDocument = require('pdfkit');
 const ExcelJS = require('exceljs');
+const crypto = require('crypto');
+const path = require('path');
 const Credit = require('../Models/Credit');
 const User = require('../Models/User');
 const { createExportVerification, addExcelVerificationSheet, addPdfVerification } = require('../utils/exportVerification');
@@ -170,39 +172,202 @@ async function createExcel(ledger, generatedBy, verification) {
 function createPdf(ledger, generatedBy, verification) {
   return new Promise((resolve, reject) => {
     try {
-      const doc = new PDFDocument({ size: 'A4', margin: 36, bufferPages: true });
+      const doc = new PDFDocument({
+        size: 'A4',
+        margins: { top: 34, right: 36, bottom: 52, left: 36 },
+        bufferPages: true,
+        info: {
+          Title: 'Individual Faculty Credit Ledger',
+          Author: 'E.G.S. Pillay Group of Institutions',
+          Subject: `Official faculty credit ledger - ${verification.documentId}`,
+          Keywords: 'faculty, credit ledger, EGSPGOI, verified export',
+        },
+      });
       const chunks = [];
       doc.on('data', chunk => chunks.push(chunk));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
+
       const f = ledger.faculty;
-      doc.font('Helvetica-Bold').fontSize(18).fillColor('#001b70').text('E.G.S. Pillay Group of Institutions', { align: 'center' });
-      doc.fontSize(14).fillColor('#222').text('Individual Faculty Credit Ledger', { align: 'center' }).moveDown();
-      doc.font('Helvetica').fontSize(9);
-      const details = [
-        `Faculty: ${`${f.prefix} ${f.name}`.trim()} (${f.facultyID || 'N/A'})`, `Email: ${f.email || 'N/A'}`,
-        `College: ${f.college || 'N/A'}`, `Department: ${f.department || 'N/A'}`,
-        `Designation: ${f.designation || 'N/A'}`, `Professional Category: ${f.roleCategory || 'N/A'}`,
-        `Status: ${f.isActive ? 'Active' : 'Inactive'}`, `Current stored balance: ${f.currentCredit}`
+      const pageWidth = doc.page.width;
+      const contentX = 36;
+      const contentWidth = pageWidth - 72;
+      const navy = '#001B70';
+      const blue = '#174EA6';
+      const magenta = '#AF005F';
+      const green = '#087A55';
+      const red = '#B42318';
+      const ink = '#172033';
+      const muted = '#667085';
+      const border = '#D7DFEA';
+      const soft = '#F5F7FB';
+      const logoPath = path.join(__dirname, '../public/egs-pillay-group-logo-flat-dark.png');
+      const issuedDate = new Date(verification.issuedAt);
+      const facultyName = `${f.prefix || ''} ${f.name || ''}`.trim() || 'N/A';
+
+      const fit = (value, fallback = 'N/A') => {
+        const text = String(value || '').trim();
+        return text || fallback;
+      };
+
+      const drawInstitutionHeader = (compact = false) => {
+        const top = 28;
+        if (!compact) {
+          try { doc.image(logoPath, contentX, top, { fit: [92, 42], align: 'left', valign: 'center' }); }
+          catch { doc.font('Helvetica-Bold').fontSize(13).fillColor(navy).text('EGSPGOI', contentX, top + 10); }
+          doc.font('Helvetica-Bold').fontSize(15).fillColor(navy)
+            .text('E.G.S. Pillay Group of Institutions', 142, top + 1, { width: 417, align: 'right' });
+          doc.font('Helvetica').fontSize(7.5).fillColor(muted)
+            .text('Faculty Credit System | Official Institutional Record', 142, top + 23, { width: 417, align: 'right' });
+          doc.moveTo(contentX, 78).lineTo(contentX + contentWidth, 78).strokeColor(navy).lineWidth(2).stroke();
+          doc.moveTo(contentX, 82).lineTo(contentX + contentWidth, 82).strokeColor(magenta).lineWidth(0.7).stroke();
+          doc.y = 96;
+        } else {
+          doc.font('Helvetica-Bold').fontSize(9).fillColor(navy)
+            .text('E.G.S. PILLAY GROUP OF INSTITUTIONS', contentX, top, { width: 300 });
+          doc.font('Helvetica').fontSize(7).fillColor(muted)
+            .text('INDIVIDUAL FACULTY CREDIT LEDGER', 336, top + 1, { width: 223, align: 'right' });
+          doc.moveTo(contentX, 48).lineTo(contentX + contentWidth, 48).strokeColor(navy).lineWidth(1).stroke();
+          doc.y = 60;
+        }
+      };
+
+      const drawField = (label, value, x, y, width) => {
+        doc.font('Helvetica-Bold').fontSize(6.5).fillColor(muted).text(label.toUpperCase(), x, y, { width });
+        doc.font('Helvetica').fontSize(8.5).fillColor(ink).text(fit(value), x, y + 11, { width, ellipsis: true, height: 14 });
+      };
+
+      const drawSummaryCard = (label, value, x, color) => {
+        doc.roundedRect(x, doc.y, 122, 48, 4).fillAndStroke('#FFFFFF', border);
+        const y = doc.y;
+        doc.font('Helvetica-Bold').fontSize(6.5).fillColor(muted).text(label.toUpperCase(), x + 10, y + 9, { width: 102 });
+        doc.font('Helvetica-Bold').fontSize(16).fillColor(color).text(String(value), x + 10, y + 22, { width: 102 });
+      };
+
+      const columns = [
+        { label: 'DATE', key: 'date', x: 36, width: 58, align: 'left' },
+        { label: 'ACTIVITY / REFERENCE', key: 'activity', x: 94, width: 190, align: 'left' },
+        { label: 'TYPE', key: 'type', x: 284, width: 50, align: 'center' },
+        { label: 'STATUS', key: 'status', x: 334, width: 68, align: 'center' },
+        { label: 'POINTS', key: 'points', x: 402, width: 65, align: 'right' },
+        { label: 'EFFECTIVE', key: 'effective', x: 467, width: 92, align: 'right' },
       ];
-      details.forEach(value => doc.text(value));
-      doc.moveDown().font('Helvetica-Bold').text(`Selected range: ${ledger.filters.startDate || 'Beginning'} to ${ledger.filters.endDate || 'Present'}`);
-      doc.text(`Records: ${ledger.summary.totalRecords} | Positive: ${ledger.summary.positivePoints} | Negative: ${ledger.summary.negativePoints} | Effective net: ${ledger.summary.effectiveNet}`);
-      doc.moveDown();
+
+      const drawTableHeader = () => {
+        const y = doc.y;
+        doc.rect(contentX, y, contentWidth, 24).fill(navy);
+        columns.forEach(column => {
+          doc.font('Helvetica-Bold').fontSize(6.5).fillColor('#FFFFFF')
+            .text(column.label, column.x + 6, y + 8, { width: column.width - 12, align: column.align });
+        });
+        doc.y = y + 24;
+      };
+
+      const addContinuationPage = () => {
+        doc.addPage({ size: 'A4', margins: { top: 34, right: 36, bottom: 52, left: 36 } });
+        drawInstitutionHeader(true);
+        drawTableHeader();
+      };
+
+      drawInstitutionHeader(false);
+      doc.font('Helvetica-Bold').fontSize(17).fillColor(ink).text('Individual Faculty Credit Ledger', contentX, doc.y, { width: 350 });
+      doc.font('Helvetica-Bold').fontSize(7).fillColor(magenta)
+        .text('VERIFIED OFFICIAL EXPORT', 406, doc.y - 15, { width: 153, align: 'right' });
+      doc.font('Helvetica').fontSize(6.5).fillColor(muted)
+        .text(`Document ID: ${verification.documentId}`, 320, doc.y - 1, { width: 239, align: 'right' });
+      doc.moveDown(1.2);
+
+      const profileY = doc.y;
+      doc.roundedRect(contentX, profileY, contentWidth, 92, 5).fillAndStroke(soft, border);
+      drawField('Faculty name', facultyName, 50, profileY + 13, 235);
+      drawField('Faculty ID', f.facultyID, 300, profileY + 13, 110);
+      drawField('Employment status', f.isActive ? 'Active' : 'Inactive', 425, profileY + 13, 120);
+      drawField('Institution / College', f.college, 50, profileY + 49, 235);
+      drawField('Department', f.department, 300, profileY + 49, 110);
+      drawField('Designation', f.designation, 425, profileY + 49, 120);
+      doc.y = profileY + 108;
+
+      const summaryY = doc.y;
+      drawSummaryCard('Positive credits', ledger.summary.positivePoints, 36, green);
+      doc.y = summaryY;
+      drawSummaryCard('Negative credits', ledger.summary.negativePoints, 169, red);
+      doc.y = summaryY;
+      drawSummaryCard('Effective net', ledger.summary.effectiveNet, 302, blue);
+      doc.y = summaryY;
+      drawSummaryCard('Records', ledger.summary.totalRecords, 435, ink);
+      doc.y = summaryY + 61;
+
+      doc.roundedRect(contentX, doc.y, contentWidth, 34, 3).fillAndStroke('#FFFFFF', border);
+      const filterY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(6.5).fillColor(muted).text('REPORT SCOPE', 48, filterY + 7);
+      doc.font('Helvetica').fontSize(7.5).fillColor(ink)
+        .text(`${ledger.filters.startDate || 'Beginning'} to ${ledger.filters.endDate || 'Present'}  |  Type: ${String(ledger.filters.type).toUpperCase()}  |  Status: ${String(ledger.filters.status).toUpperCase()}`, 48, filterY + 18, { width: 360 });
+      doc.font('Helvetica').fontSize(6.5).fillColor(muted)
+        .text(`Issued ${issuedDate.toLocaleString('en-IN')}`, 410, filterY + 12, { width: 137, align: 'right' });
+      doc.y = filterY + 48;
+
+      doc.font('Helvetica-Bold').fontSize(9).fillColor(ink).text('Credit Transactions', contentX, doc.y);
+      doc.moveDown(0.6);
+      drawTableHeader();
+
+      if (!ledger.credits.length) {
+        doc.rect(contentX, doc.y, contentWidth, 46).fillAndStroke('#FFFFFF', border);
+        doc.font('Helvetica').fontSize(8).fillColor(muted)
+          .text('No credit records matched the selected filters.', contentX, doc.y + 17, { width: contentWidth, align: 'center' });
+        doc.y += 46;
+      }
+
       ledger.credits.forEach((credit, index) => {
-        if (doc.y > 735) doc.addPage();
-        const signValue = credit.type === 'positive' ? `+${Math.abs(Number(credit.points) || 0)}` : `-${Math.abs(Number(credit.points) || 0)}`;
-        doc.font('Helvetica-Bold').fontSize(9).fillColor('#111').text(`${index + 1}. ${credit.title || 'Untitled'}  [${signValue}]`);
-        doc.font('Helvetica').fontSize(8).fillColor('#444').text(`${new Date(credit.createdAt).toLocaleDateString('en-IN')} | ${credit.academicYear || 'N/A'} | ${String(credit.type || '').toUpperCase()} | ${String(credit.status || '').toUpperCase()} | Effective: ${effectivePoints(credit)}`);
-        if (credit.notes) doc.text(`Details: ${credit.notes}`);
-        if (credit.proofUrl) doc.text(`Proof: ${credit.proofUrl}`);
-        doc.moveDown(0.6);
+        const title = `${index + 1}. ${fit(credit.title, 'Untitled activity')}`;
+        const detail = [credit.academicYear, Array.isArray(credit.categories) ? credit.categories.join(', ') : null, credit.proofUrl ? 'Evidence attached' : null]
+          .filter(Boolean).join(' | ');
+        doc.font('Helvetica-Bold').fontSize(7.5);
+        const titleHeight = doc.heightOfString(title, { width: 178 });
+        doc.font('Helvetica').fontSize(6.5);
+        const detailHeight = detail ? doc.heightOfString(detail, { width: 178 }) : 0;
+        const rowHeight = Math.max(38, titleHeight + detailHeight + 17);
+        if (doc.y + rowHeight > 770) addContinuationPage();
+        const rowY = doc.y;
+        doc.rect(contentX, rowY, contentWidth, rowHeight).fill(index % 2 === 0 ? '#FFFFFF' : '#F8FAFD');
+        doc.moveTo(contentX, rowY + rowHeight).lineTo(contentX + contentWidth, rowY + rowHeight).strokeColor(border).lineWidth(0.35).stroke();
+
+        const magnitude = Math.abs(Number(credit.points) || 0);
+        const signValue = credit.type === 'positive' ? `+${magnitude}` : `-${magnitude}`;
+        const effective = effectivePoints(credit);
+        const date = credit.createdAt && !Number.isNaN(new Date(credit.createdAt).getTime())
+          ? new Date(credit.createdAt).toLocaleDateString('en-IN') : 'N/A';
+
+        doc.font('Helvetica').fontSize(7).fillColor(ink).text(date, 42, rowY + 11, { width: 46 });
+        doc.font('Helvetica-Bold').fontSize(7.5).fillColor(ink).text(title, 100, rowY + 7, { width: 178 });
+        if (detail) doc.font('Helvetica').fontSize(6.2).fillColor(muted).text(detail, 100, rowY + 9 + titleHeight, { width: 178 });
+        doc.font('Helvetica-Bold').fontSize(6.5).fillColor(credit.type === 'positive' ? green : red)
+          .text(String(credit.type || 'N/A').toUpperCase(), 290, rowY + 12, { width: 38, align: 'center' });
+        doc.font('Helvetica-Bold').fontSize(6.3).fillColor(ink)
+          .text(String(credit.status || 'N/A').toUpperCase(), 340, rowY + 12, { width: 56, align: 'center' });
+        doc.font('Helvetica-Bold').fontSize(8).fillColor(credit.type === 'positive' ? green : red)
+          .text(signValue, 408, rowY + 11, { width: 53, align: 'right' });
+        doc.font('Helvetica-Bold').fontSize(8).fillColor(effective >= 0 ? green : red)
+          .text(`${effective > 0 ? '+' : ''}${effective}`, 473, rowY + 11, { width: 80, align: 'right' });
+        doc.y = rowY + rowHeight;
       });
+
+      if (doc.y > 600) {
+        doc.addPage({ size: 'A4', margins: { top: 34, right: 36, bottom: 52, left: 36 } });
+        drawInstitutionHeader(true);
+        doc.font('Helvetica-Bold').fontSize(10).fillColor(ink).text('Document Verification', contentX, doc.y);
+      }
       addPdfVerification(doc, verification);
+
       const pages = doc.bufferedPageRange();
       for (let i = pages.start; i < pages.start + pages.count; i += 1) {
         doc.switchToPage(i);
-        doc.fontSize(7).fillColor('#777').text(`Generated by ${generatedBy} | ${new Date().toLocaleString('en-IN')} | Page ${i + 1}`, 36, 806, { width: 523, align: 'center' });
+        // Keep footer inside PDFKit's A4 content boundary. Drawing below the
+        // bottom margin can silently create an extra blank page.
+        const footerY = 780;
+        doc.moveTo(contentX, footerY - 7).lineTo(contentX + contentWidth, footerY - 7).strokeColor(border).lineWidth(0.45).stroke();
+        doc.font('Helvetica').fontSize(6.5).fillColor(muted)
+          .text(`Generated by ${generatedBy} | ${verification.documentId}`, contentX, footerY, { width: 390, align: 'left', lineBreak: false });
+        doc.text(`Page ${i + 1} of ${pages.count}`, 426, footerY, { width: 133, align: 'right', lineBreak: false });
       }
       doc.end();
     } catch (error) { reject(error); }
@@ -234,12 +399,15 @@ async function exportFacultyLedger(req, res, next) {
       ? await createExcel(ledger, generatedBy, verification)
       : await createPdf(ledger, generatedBy, verification);
     const ext = format === 'excel' ? 'xlsx' : 'pdf';
+    const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const randomPart = crypto.randomBytes(5).toString('hex').toUpperCase();
+    const fileName = `EGSPGOI_Faculty_Credit_Ledger_${safeId}_${datePart}_${randomPart}.${ext}`;
     res.setHeader('Content-Type', format === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="Faculty_Credit_Ledger_${safeId}.${ext}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     res.setHeader('X-FCS-Document-ID', verification.documentId);
     res.setHeader('X-FCS-Content-SHA256', verification.contentHash);
     res.send(buffer);
   } catch (error) { next(error); }
 }
 
-module.exports = { getFacultyLedger, exportFacultyLedger };
+module.exports = { getFacultyLedger, exportFacultyLedger, createPdf };
