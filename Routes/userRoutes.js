@@ -16,7 +16,11 @@ const {
   getSessions,
   exportUserData
 } = require('../Controllers/userController');
-const { authMiddleware, adminOrOA } = require('../Middleware/authMiddleware');
+const { authMiddleware, requirePermission } = require('../Middleware/authMiddleware');
+const {
+  getOwnProfessionalProfile, getFacultyProfessionalProfile,
+  updateOwnProfessionalProfile, updateFacultyEmployment,
+} = require('../Controllers/facultyProfileController');
 
 /**
  * Use formidable to parse form-data directly into memory
@@ -40,14 +44,18 @@ router.post('/me/mfa/enable', authMiddleware, enableMfa);
 router.post('/me/mfa/disable', authMiddleware, disableMfa);
 router.get('/me/sessions', authMiddleware, getSessions);
 router.get('/me/export', authMiddleware, exportUserData);
+router.get('/me/professional-profile', authMiddleware, getOwnProfessionalProfile);
+router.patch('/me/professional-profile', authMiddleware, requirePermission('profile.update:self'), updateOwnProfessionalProfile);
 
 /**
  * Admin routes
  */
-router.post('/', authMiddleware, adminOrOA, parseForm, adminCreateUser);
-router.get('/', authMiddleware, adminOrOA, listUsers);
-router.get('/:id', authMiddleware, adminOrOA, getUserById);
-router.put('/:id', authMiddleware, adminOrOA, parseForm, adminUpdateUser);
-router.delete('/:id', authMiddleware, adminOrOA, deleteUser);
+router.post('/', authMiddleware, requirePermission('user.create'), parseForm, adminCreateUser);
+router.get('/', authMiddleware, requirePermission('user.read'), listUsers);
+router.get('/:id/professional-profile', authMiddleware, requirePermission('profile.read:any'), getFacultyProfessionalProfile);
+router.put('/:id/employment', authMiddleware, requirePermission('profile.update:any'), updateFacultyEmployment);
+router.get('/:id', authMiddleware, requirePermission('user.read'), getUserById);
+router.put('/:id', authMiddleware, requirePermission('user.update'), parseForm, adminUpdateUser);
+router.delete('/:id', authMiddleware, requirePermission('user.deactivate'), deleteUser);
 
 module.exports = router;

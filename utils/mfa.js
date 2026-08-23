@@ -1,10 +1,11 @@
 // utils/mfa.js
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
+const crypto = require('crypto');
 const { sendEmail } = require('./email');
 
 function generateMfaCode() {
-  return Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit numeric
+  return crypto.randomInt(100000, 1000000).toString();
 }
 
 async function sendMfaEmail(user, code) {

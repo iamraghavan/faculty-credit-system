@@ -4,6 +4,25 @@ const User = require('../../Models/User');
 const { generateFacultyID, generateApiKey } = require('../../utils/generateID');
 const { verifyTotpToken, generateMfaCode, sendMfaEmail } = require('../../utils/mfa');
 const { schemas } = require('../../utils/validation');
+const Session = require('../../Models/Session');
+const { permissionsFor } = require('../../config/permissions');
+
+async function createLoginSession(user, req) {
+  const timeout = Math.max(300000, Number(process.env.SESSION_TIMEOUT) || 3600000);
+  const session = await Session.create({
+    userId: String(user._id || user.id),
+    device: req.headers['user-agent'] || 'Unknown device',
+    lastIp: req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown',
+    userAgent: req.headers['user-agent'] || '',
+    expiresAt: new Date(Date.now() + timeout).toISOString(),
+    mfaVerifiedAt: user.mfaEnabled ? new Date().toISOString() : null,
+  });
+
+  const sessions = await Session.findByUserId(String(user._id || user.id));
+  const maximum = Math.max(1, Number(process.env.MAX_ACTIVE_SESSIONS) || 5);
+  for (const oldSession of sessions.slice(maximum)) await Session.revoke(oldSession._id);
+  return session;
+}
 
 /**
  * Register a new user
@@ -50,12 +69,6 @@ async function register(req, res, next) {
       updatedAt: new Date().toISOString(),
     });
 
-    const token = jwt.sign(
-      { id: newUser._id, role: assignedRole },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
-    );
-
     return res.status(201).json({
       success: true,
       data: {
@@ -65,7 +78,7 @@ async function register(req, res, next) {
         fcmToken: newUser.fcmToken || null,
         whatsappNumber: newUser.whatsappNumber || null,
         whatsappVerified: newUser.whatsappVerified || false,
-        token
+        permissions: permissionsFor(newUser),
       }
     });
 
@@ -88,6 +101,7 @@ async function login(req, res, next) {
     if (users.length === 0) return res.status(401).json({ success: false, message: 'Invalid credentials' });
 
     const user = users[0];
+    if (user.isActive === false) return res.status(403).json({ success: false, message: 'Account is inactive' });
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(401).json({ success: false, message: 'Invalid credentials' });
 
@@ -115,8 +129,9 @@ async function login(req, res, next) {
       user.fcmToken = fcmToken;
     }
 
+    const session = await createLoginSession(user, req);
     const token = jwt.sign(
-      { id: targetUserId, role: user.role },
+      { id: targetUserId, role: user.role, sessionId: session._id },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
     );
@@ -131,7 +146,10 @@ async function login(req, res, next) {
         fcmToken: user.fcmToken || null,
         whatsappNumber: user.whatsappNumber || null,
         whatsappVerified: user.whatsappVerified ?? false,
-        token
+        permissions: permissionsFor(user),
+        token,
+        sessionId: session._id,
+        sessionExpiresAt: session.expiresAt,
       }
     });
 
@@ -140,4 +158,4 @@ async function login(req, res, next) {
   }
 }
 
-module.exports = { register, login };
+module.exports = { register, login, createLoginSession };

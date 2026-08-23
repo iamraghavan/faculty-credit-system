@@ -11,9 +11,8 @@ async function enableAppMfa(req, res, next) {
     const qrCodeDataURL = await generateTotpQrCode(secret);
 
     await User.update(user._id, {
-      mfaAppEnabled: true,
-      mfaSecret: secret.base32,
-      mfaEnabled: true,
+      mfaPendingSecret: secret.base32,
+      mfaPendingExpiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
       updatedAt: new Date().toISOString(),
     });
 
@@ -28,9 +27,31 @@ async function enableAppMfa(req, res, next) {
 }
 
 async function verifyAppMfaSetup(req, res, next) {
-    // ... similar logic ...
-    // Placeholder implementation for brevity in this response, ideally full move.
-    return res.json({ success: true, message: "MFA Setup Verified (Refactored)" });
+  try {
+    const token = String(req.body?.token || '').trim();
+    if (!/^\d{6}$/.test(token)) return res.status(400).json({ success: false, message: 'A 6-digit authenticator code is required' });
+    const userId = String(req.user._id || req.user.id);
+    const user = await User.findById(userId);
+    const expired = !user?.mfaPendingExpiresAt || new Date(user.mfaPendingExpiresAt).getTime() <= Date.now();
+    if (!user?.mfaPendingSecret || expired) {
+      return res.status(400).json({ success: false, message: 'MFA setup expired. Start setup again.' });
+    }
+    if (!verifyTotpToken(user.mfaPendingSecret, token)) {
+      return res.status(400).json({ success: false, message: 'Invalid authenticator code' });
+    }
+    await User.update(userId, {
+      mfaEnabled: true,
+      mfaAppEnabled: true,
+      mfaEmailEnabled: false,
+      mfaSecret: user.mfaPendingSecret,
+      mfaPendingSecret: null,
+      mfaPendingExpiresAt: null,
+      updatedAt: new Date().toISOString(),
+    });
+    return res.json({ success: true, message: 'Authenticator MFA enabled successfully' });
+  } catch (err) {
+    next(err);
+  }
 }
 
 // ... other MFA methods ...

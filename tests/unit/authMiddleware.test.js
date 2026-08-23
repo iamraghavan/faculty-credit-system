@@ -63,10 +63,10 @@ describe('Auth Middleware Security Tests', () => {
       expect(next).toHaveBeenCalled();
     });
 
-    it('adminOnly should block superadmin (based on strict equality)', () => {
+    it('adminOnly should allow superadmin', () => {
       req.user = { role: 'superadmin' };
       adminOnly(req, res, next);
-      expect(res.status).toHaveBeenCalledWith(403);
+      expect(next).toHaveBeenCalled();
     });
 
     it('adminOnly should allow admin', () => {

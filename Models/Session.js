@@ -26,7 +26,9 @@ module.exports = {
             lastIp: data.lastIp || 'unknown',
             userAgent: data.userAgent || '',
             isValid: true,
+            mfaVerifiedAt: data.mfaVerifiedAt || null,
             expiresAt: data.expiresAt || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days default
+            ttl: Math.floor(new Date(data.expiresAt || Date.now() + 30 * 24 * 60 * 60 * 1000).getTime() / 1000),
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
         };
@@ -42,8 +44,13 @@ module.exports = {
         const client = getDynamoClient();
         // Using scan since userId might not be the partition key unless we configure a GSI
         // For now, keeping it simple consistent with other models
-        const res = await client.send(new ScanCommand({ TableName: TABLE }));
-        const items = res.Items || [];
+        const items = [];
+        let ExclusiveStartKey;
+        do {
+            const res = await client.send(new ScanCommand({ TableName: TABLE, ExclusiveStartKey }));
+            items.push(...(res.Items || []));
+            ExclusiveStartKey = res.LastEvaluatedKey;
+        } while (ExclusiveStartKey);
 
         return items
             .filter((s) => s.userId === userId && s.isValid)

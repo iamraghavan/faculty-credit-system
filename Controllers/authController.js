@@ -1020,7 +1020,7 @@ async function revokeSession(req, res, next) {
 async function revokeAllOtherSessions(req, res, next) {
   try {
     const sessions = await Session.findByUserId(String(req.user._id));
-    const currentSessionId = req.user.sessionId;
+    const currentSessionId = req.auth?.sessionId;
 
     for (const s of sessions) {
       if (s._id !== currentSessionId) {

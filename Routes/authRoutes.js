@@ -41,6 +41,7 @@ router.get('/profile', authMiddleware, getProfile);
 
 // Session Management
 router.get('/sessions', authMiddleware, listSessions);
+router.delete('/sessions/:id', authMiddleware, revokeSession);
 router.delete('/sessions/others', authMiddleware, revokeAllOtherSessions);
 // WhatsApp Verification
 router.post('/whatsapp/send-otp', authMiddleware, sendWhatsappOtp);
