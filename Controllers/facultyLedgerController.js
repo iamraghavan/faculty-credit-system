@@ -110,13 +110,10 @@ async function getFacultyLedger(req, res, next) {
 
 function validateRankingQuery(query) {
   const type = String(query.type || 'all').toLowerCase();
-  const sort = String(query.sort || 'desc').toLowerCase();
+  const sort = 'desc';
   const groupBy = String(query.groupBy || 'institution').toLowerCase();
   if (!['all', 'positive', 'negative'].includes(type)) {
     const error = new Error('type must be all, positive, or negative'); error.status = 400; throw error;
-  }
-  if (!['asc', 'desc'].includes(sort)) {
-    const error = new Error('sort must be asc or desc'); error.status = 400; throw error;
   }
   if (!['institution', 'college', 'department'].includes(groupBy)) {
     const error = new Error('groupBy must be institution, college, or department'); error.status = 400; throw error;
@@ -158,7 +155,7 @@ async function loadFacultyRanking(query) {
       ? row.negativePoints
       : row.positivePoints + row.negativePoints;
   const rows = [...totals.values()].sort((a, b) => {
-    const difference = sort === 'asc' ? rankingPoints(a) - rankingPoints(b) : rankingPoints(b) - rankingPoints(a);
+    const difference = rankingPoints(b) - rankingPoints(a);
     return difference || a.faculty.name.localeCompare(b.faculty.name);
   }).map((row, index) => ({ rank: index + 1, rankingPoints: rankingPoints(row), ...row }));
   const options = await User.find({ role: 'faculty' });
