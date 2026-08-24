@@ -10,6 +10,7 @@ const { sendPushToUser } = require('./pushController');
 const { recalcFacultyCredits } = require('../utils/calculateCredits');
 const { sendWhatsAppMessage } = require('../utils/whatsapp');
 const { sendRemarkNotificationHelper } = require('../utils/notificationHelper');
+const Notification = require('../Models/Notification');
 require('dotenv').config();
 
 const TEMPLATE_DIR = path.join(__dirname, '..', 'email-templates');
@@ -110,13 +111,54 @@ async function broadcastNotification(req, res, next) {
       .filter(u => u.fcmToken)
       .map(u => sendFcmNotification(u.fcmToken, payload));
 
-    // Run all in parallel
-    await Promise.allSettled([...pushPromises, ...fcmPromises]);
+    const inAppPromises = users
+      .filter(user => user.isActive !== false)
+      .map(user => Notification.create({ userId: user._id || user.id, type: 'broadcast', title, message: body, url: payload.url, icon: payload.icon, channels: { inApp: 'delivered' } }));
 
-    return res.json({ success: true, message: 'Broadcast sent to all active devices' });
+    const emailPromises = users
+      .filter(user => user.isActive !== false && user.email)
+      .map(user => sendEmail({
+        to: user.email,
+        subject: title,
+        text: `${title}\n\n${body}\n\n${payload.url}`,
+        html: `<div style="font-family:Arial,sans-serif;max-width:640px;margin:auto"><h2 style="color:#17324d">${escapeHtml(title)}</h2><p>${escapeHtml(body)}</p><p><a href="${escapeHtml(payload.url)}">Open CreditWise</a></p><hr><small>E.G.S. Pillay Group of Institutions</small></div>`,
+      }));
+
+    // Run all in parallel
+    const deliveries = await Promise.allSettled([...pushPromises, ...fcmPromises, ...inAppPromises, ...emailPromises]);
+
+    return res.json({ success: true, message: 'Broadcast processed', deliveries: { total: deliveries.length, failed: deliveries.filter(item => item.status === 'rejected').length } });
   } catch (err) {
     next(err);
   }
 }
 
-module.exports = { sendRemarkNotification, broadcastNotification };
+function escapeHtml(value) {
+  return String(value || '').replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
+}
+
+async function listNotifications(req, res, next) {
+  try {
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
+    const items = await Notification.findByUserId(req.user._id || req.user.id, limit);
+    res.json({ success: true, items, unreadCount: items.filter(item => !item.read).length });
+  } catch (error) { next(error); }
+}
+
+async function markNotificationRead(req, res, next) {
+  try {
+    const item = await Notification.findById(req.params.id);
+    if (!item || String(item.userId) !== String(req.user._id || req.user.id)) return res.status(404).json({ success: false, message: 'Notification not found' });
+    res.json({ success: true, item: await Notification.markRead(item._id, req.user._id || req.user.id) });
+  } catch (error) { next(error); }
+}
+
+async function markAllNotificationsRead(req, res, next) {
+  try {
+    const items = await Notification.findByUserId(req.user._id || req.user.id, 200);
+    await Promise.all(items.filter(item => !item.read).map(item => Notification.markRead(item._id, req.user._id || req.user.id)));
+    res.json({ success: true, updatedCount: items.filter(item => !item.read).length });
+  } catch (error) { next(error); }
+}
+
+module.exports = { sendRemarkNotification, broadcastNotification, listNotifications, markNotificationRead, markAllNotificationsRead };

@@ -7,6 +7,7 @@ const { sendEmail } = require('../utils/email');
 const { generateRemarkPdf } = require('../utils/pdfGenerator');
 const { sendFcmNotification } = require('../utils/firebase');
 const User = require('../Models/User');
+const Notification = require('../Models/Notification');
 require('dotenv').config();
 
 // Configure web-push
@@ -53,14 +54,22 @@ async function subscribe(req, res, next) {
  */
 async function sendPushToUser(userId, payload) {
     try {
+        const user = await User.findById(userId);
+        const channelStatus = { inApp: 'pending', webPush: 'not_subscribed', fcm: 'not_configured', email: 'not_configured' };
+
+        const inApp = await Notification.create({
+            userId, type: payload.type || payload.data?.type || 'general', title: payload.title,
+            message: payload.body, url: payload.url, icon: payload.icon,
+            metadata: payload.data || {}, channels: channelStatus,
+        });
+        channelStatus.inApp = 'delivered';
+
         const subscriptions = await PushSubscription.findByUserId(userId);
-        if (!subscriptions || subscriptions.length === 0) return;
-
         const notificationPayload = JSON.stringify(payload);
-
-        const promises = subscriptions.map(async (sub) => {
+        const promises = (subscriptions || []).map(async (sub) => {
             try {
                 await webpush.sendNotification(sub, notificationPayload);
+                channelStatus.webPush = 'delivered';
             } catch (err) {
                 if (err.statusCode === 410 || err.statusCode === 404) {
                     await PushSubscription.delete(sub.endpoint);
@@ -72,8 +81,7 @@ async function sendPushToUser(userId, payload) {
 
         await Promise.all(promises);
 
-        // 2. Send via FCM (Firebase)
-        const user = await User.findById(userId);
+        // FCM is independent of Web Push subscriptions.
         if (user && user.fcmToken) {
             await sendFcmNotification(user.fcmToken, {
                 title: payload.title,
@@ -82,10 +90,27 @@ async function sendPushToUser(userId, payload) {
                 icon: payload.icon,
                 data: payload.data
             });
+            channelStatus.fcm = 'delivered';
         }
+
+        // Transactional email is enabled by default; callers that already send a richer email can opt out.
+        if (user?.email && payload.email !== false) {
+            await sendEmail({
+                to: user.email, subject: payload.title,
+                text: `${payload.title}\n\n${payload.body}\n\nOpen CreditWise: ${payload.url || process.env.FRONTEND_URL || ''}`,
+                html: `<div style="font-family:Arial,sans-serif;max-width:640px;margin:auto"><h2 style="color:#17324d">${escapeHtml(payload.title)}</h2><p>${escapeHtml(payload.body)}</p><p><a href="${escapeHtml(payload.url || process.env.FRONTEND_URL || '#')}">Open CreditWise</a></p><hr><small>E.G.S. Pillay Group of Institutions</small></div>`,
+            });
+            channelStatus.email = 'delivered';
+        }
+        return { notificationId: inApp._id, channels: channelStatus };
     } catch (err) {
         console.error('Failed to send push batch:', err);
+        return { error: err.message };
     }
+}
+
+function escapeHtml(value) {
+    return String(value || '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
 }
 
 /**

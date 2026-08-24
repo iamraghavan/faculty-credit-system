@@ -108,6 +108,120 @@ async function getFacultyLedger(req, res, next) {
   }
 }
 
+function validateRankingQuery(query) {
+  const type = String(query.type || 'all').toLowerCase();
+  const sort = String(query.sort || 'desc').toLowerCase();
+  const groupBy = String(query.groupBy || 'institution').toLowerCase();
+  if (!['all', 'positive', 'negative'].includes(type)) {
+    const error = new Error('type must be all, positive, or negative'); error.status = 400; throw error;
+  }
+  if (!['asc', 'desc'].includes(sort)) {
+    const error = new Error('sort must be asc or desc'); error.status = 400; throw error;
+  }
+  if (!['institution', 'college', 'department'].includes(groupBy)) {
+    const error = new Error('groupBy must be institution, college, or department'); error.status = 400; throw error;
+  }
+  return { type, sort, groupBy, ...parseDateRange(query.startDate, query.endDate) };
+}
+
+async function loadFacultyRanking(query) {
+  const { type, sort, groupBy, start, end } = validateRankingQuery(query);
+  const college = String(query.college || '').trim();
+  const department = String(query.department || '').trim();
+  const faculty = (await User.find({ role: 'faculty' })).filter(user =>
+    (!college || String(user.college || '') === college) &&
+    (!department || String(user.department || '') === department));
+  const facultyIds = new Set(faculty.map(user => String(user._id)));
+  const credits = (await Credit.find()).filter(credit => {
+    if (!facultyIds.has(String(credit.faculty))) return false;
+    if (type !== 'all' && String(credit.type).toLowerCase() !== type) return false;
+    const created = new Date(credit.createdAt);
+    if (start && created < start) return false;
+    if (end && created > end) return false;
+    return true;
+  });
+  const totals = new Map(faculty.map(user => [String(user._id), {
+    faculty: publicFaculty(user), positivePoints: 0, negativePoints: 0, netCredits: 0, records: 0,
+  }]));
+  credits.forEach(credit => {
+    const row = totals.get(String(credit.faculty));
+    if (!row) return;
+    const magnitude = Math.abs(Number(credit.points) || 0);
+    row.records += 1;
+    if (credit.type === 'positive') row.positivePoints += magnitude;
+    if (credit.type === 'negative') row.negativePoints += magnitude;
+    row.netCredits += effectivePoints(credit);
+  });
+  const rows = [...totals.values()].sort((a, b) => {
+    const difference = sort === 'asc' ? a.netCredits - b.netCredits : b.netCredits - a.netCredits;
+    return difference || a.faculty.name.localeCompare(b.faculty.name);
+  }).map((row, index) => ({ rank: index + 1, ...row }));
+  const options = await User.find({ role: 'faculty' });
+  return {
+    rows,
+    summary: rows.reduce((sum, row) => ({
+      facultyCount: sum.facultyCount + 1,
+      positivePoints: sum.positivePoints + row.positivePoints,
+      negativePoints: sum.negativePoints + row.negativePoints,
+      netCredits: sum.netCredits + row.netCredits,
+    }), { facultyCount: 0, positivePoints: 0, negativePoints: 0, netCredits: 0 }),
+    options: {
+      colleges: [...new Set(options.map(user => user.college).filter(Boolean))].sort(),
+      departments: [...new Set(options.filter(user => !college || user.college === college).map(user => user.department).filter(Boolean))].sort(),
+    },
+    filters: { type, sort, groupBy, college: college || null, department: department || null, startDate: query.startDate || null, endDate: query.endDate || null },
+  };
+}
+
+async function getFacultyRanking(req, res, next) {
+  try { res.json({ success: true, data: await loadFacultyRanking(req.query) }); }
+  catch (error) { next(error); }
+}
+
+async function exportFacultyRanking(req, res, next) {
+  try {
+    const format = String(req.query.format || '').toLowerCase();
+    if (!['pdf', 'excel'].includes(format)) return res.status(400).json({ success: false, message: 'format must be pdf or excel' });
+    const report = await loadFacultyRanking(req.query);
+    const title = 'Faculty Credit Ranking Ledger';
+    let buffer;
+    if (format === 'excel') {
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet('Faculty Ranking');
+      sheet.addRow([title]);
+      sheet.addRow(['Scope', report.filters.groupBy, 'College', report.filters.college || 'All', 'Department', report.filters.department || 'All']);
+      sheet.addRow(['Credit type', report.filters.type, 'Date range', report.filters.startDate || 'Beginning', report.filters.endDate || 'Present']);
+      sheet.addRow([]);
+      sheet.addRow(['Rank', 'Faculty ID', 'Faculty Name', 'College', 'Department', 'Positive Credits', 'Negative Credits', 'Net Credits', 'Records']);
+      report.rows.forEach(row => sheet.addRow([row.rank, row.faculty.facultyID, `${row.faculty.prefix} ${row.faculty.name}`.trim(), row.faculty.college, row.faculty.department, row.positivePoints, row.negativePoints, row.netCredits, row.records]));
+      sheet.columns = [8, 18, 30, 30, 25, 18, 18, 15, 12].map(width => ({ width }));
+      sheet.getRow(5).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      sheet.getRow(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF001B70' } };
+      sheet.views = [{ state: 'frozen', ySplit: 5 }];
+      buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+    } else {
+      buffer = await new Promise((resolve, reject) => {
+        const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 36 }); const chunks = [];
+        doc.on('data', chunk => chunks.push(chunk)); doc.on('end', () => resolve(Buffer.concat(chunks))); doc.on('error', reject);
+        doc.font('Helvetica-Bold').fontSize(18).fillColor('#001B70').text(title);
+        doc.font('Helvetica').fontSize(8).fillColor('#667085').text(`Scope: ${report.filters.groupBy} | College: ${report.filters.college || 'All'} | Department: ${report.filters.department || 'All'} | Credits: ${report.filters.type} | ${report.filters.startDate || 'Beginning'} to ${report.filters.endDate || 'Present'}`);
+        doc.moveDown();
+        const widths = [35, 75, 155, 120, 105, 65, 65, 60];
+        const headers = ['Rank', 'Faculty ID', 'Faculty name', 'College', 'Department', 'Positive', 'Negative', 'Net'];
+        const drawRow = (values, header = false) => { const y = doc.y; let x = 36; if (header) doc.rect(36, y - 3, 680, 18).fill('#001B70'); values.forEach((value, i) => { doc.font(header ? 'Helvetica-Bold' : 'Helvetica').fontSize(7).fillColor(header ? '#FFFFFF' : '#172033').text(String(value ?? ''), x + 3, y, { width: widths[i] - 6, ellipsis: true }); x += widths[i]; }); doc.y = y + 19; };
+        drawRow(headers, true);
+        report.rows.forEach(row => { if (doc.y > 540) { doc.addPage(); drawRow(headers, true); } drawRow([row.rank, row.faculty.facultyID, `${row.faculty.prefix} ${row.faculty.name}`.trim(), row.faculty.college, row.faculty.department, row.positivePoints, row.negativePoints, row.netCredits]); });
+        if (!report.rows.length) doc.text('No faculty records matched the selected filters.');
+        doc.end();
+      });
+    }
+    const ext = format === 'excel' ? 'xlsx' : 'pdf';
+    res.setHeader('Content-Type', format === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="EGSPGOI_Faculty_Ranking_${new Date().toISOString().slice(0, 10)}.${ext}"`);
+    res.send(buffer);
+  } catch (error) { next(error); }
+}
+
 async function createExcel(ledger, generatedBy, verification) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'EGSPGOI Faculty Credit System';
@@ -410,4 +524,4 @@ async function exportFacultyLedger(req, res, next) {
   } catch (error) { next(error); }
 }
 
-module.exports = { getFacultyLedger, exportFacultyLedger, createPdf };
+module.exports = { getFacultyLedger, exportFacultyLedger, getFacultyRanking, exportFacultyRanking, createPdf };

@@ -37,7 +37,7 @@ const {
 
 
 const { authMiddleware, adminOnly, adminOrOA } = require('../Middleware/authMiddleware');
-const { getFacultyLedger, exportFacultyLedger } = require('../Controllers/facultyLedgerController');
+const { getFacultyLedger, exportFacultyLedger, getFacultyRanking, exportFacultyRanking } = require('../Controllers/facultyLedgerController');
 
 // Configure multer to use memory storage (serverless-safe)
 const upload = multer({
@@ -114,6 +114,8 @@ router.delete('/oa/credits/issued/:id', authMiddleware, adminOrOA, oaDeleteIssue
 // Admin: individual faculty credit ledger and professional-detail exports
 router.get('/faculty/:facultyId/credit-ledger', authMiddleware, adminOnly, getFacultyLedger);
 router.get('/faculty/:facultyId/credit-ledger/export', authMiddleware, adminOnly, exportFacultyLedger);
+router.get('/faculty-ledger/ranking', authMiddleware, adminOnly, getFacultyRanking);
+router.get('/faculty-ledger/ranking/export', authMiddleware, adminOnly, exportFacultyRanking);
 
 
 module.exports = router;

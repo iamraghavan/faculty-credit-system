@@ -9,6 +9,7 @@ const ROLE_PERMISSIONS = Object.freeze({
     'report.read', 'report.export',
     'policy.read', 'policy.draft', 'policy.publish', 'policy.retire',
     'export.official',
+    'notification.broadcast',
   ],
   oa: [
     'user.read', 'profile.read:self', 'profile.update:self', 'profile.read:any',
@@ -16,6 +17,7 @@ const ROLE_PERMISSIONS = Object.freeze({
     'credit.title.read',
     'appeal.read:any', 'appeal.resolve',
     'report.read', 'report.export', 'policy.read', 'export.official',
+    'notification.broadcast',
   ],
   faculty: [
     'profile.read:self', 'profile.update:self',

@@ -90,7 +90,9 @@ async function sendRemarkNotificationHelper({
         title: 'New Remark Received',
         body: `${title} (${pointsValue} points). Check your portal.`,
         url: portalUrl || '#',
-        icon: '/icons/warning.png'
+        icon: '/icons/warning.png',
+        type: 'negative_remark',
+        email: false
       });
     } catch (pushErr) {
       console.error('Push notification failed:', pushErr);
