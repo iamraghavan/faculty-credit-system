@@ -152,10 +152,15 @@ async function loadFacultyRanking(query) {
     if (credit.type === 'negative') row.negativePoints += magnitude;
     row.netCredits += effectivePoints(credit);
   });
+  const rankingPoints = row => type === 'positive'
+    ? row.positivePoints
+    : type === 'negative'
+      ? row.negativePoints
+      : row.positivePoints + row.negativePoints;
   const rows = [...totals.values()].sort((a, b) => {
-    const difference = sort === 'asc' ? a.netCredits - b.netCredits : b.netCredits - a.netCredits;
+    const difference = sort === 'asc' ? rankingPoints(a) - rankingPoints(b) : rankingPoints(b) - rankingPoints(a);
     return difference || a.faculty.name.localeCompare(b.faculty.name);
-  }).map((row, index) => ({ rank: index + 1, ...row }));
+  }).map((row, index) => ({ rank: index + 1, rankingPoints: rankingPoints(row), ...row }));
   const options = await User.find({ role: 'faculty' });
   return {
     rows,
@@ -192,8 +197,8 @@ async function exportFacultyRanking(req, res, next) {
       sheet.addRow(['Scope', report.filters.groupBy, 'College', report.filters.college || 'All', 'Department', report.filters.department || 'All']);
       sheet.addRow(['Credit type', report.filters.type, 'Date range', report.filters.startDate || 'Beginning', report.filters.endDate || 'Present']);
       sheet.addRow([]);
-      sheet.addRow(['Rank', 'Faculty ID', 'Faculty Name', 'College', 'Department', 'Positive Credits', 'Negative Credits', 'Net Credits', 'Records']);
-      report.rows.forEach(row => sheet.addRow([row.rank, row.faculty.facultyID, `${row.faculty.prefix} ${row.faculty.name}`.trim(), row.faculty.college, row.faculty.department, row.positivePoints, row.negativePoints, row.netCredits, row.records]));
+      sheet.addRow(['Rank', 'Faculty ID', 'Faculty Name', 'College', 'Department', 'Positive Credits', 'Negative Credits', 'Ranking Credits', 'Records']);
+      report.rows.forEach(row => sheet.addRow([row.rank, row.faculty.facultyID, `${row.faculty.prefix} ${row.faculty.name}`.trim(), row.faculty.college, row.faculty.department, row.positivePoints, row.negativePoints, row.rankingPoints, row.records]));
       sheet.columns = [8, 18, 30, 30, 25, 18, 18, 15, 12].map(width => ({ width }));
       sheet.getRow(5).font = { bold: true, color: { argb: 'FFFFFFFF' } };
       sheet.getRow(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF001B70' } };
@@ -207,10 +212,10 @@ async function exportFacultyRanking(req, res, next) {
         doc.font('Helvetica').fontSize(8).fillColor('#667085').text(`Scope: ${report.filters.groupBy} | College: ${report.filters.college || 'All'} | Department: ${report.filters.department || 'All'} | Credits: ${report.filters.type} | ${report.filters.startDate || 'Beginning'} to ${report.filters.endDate || 'Present'}`);
         doc.moveDown();
         const widths = [35, 75, 155, 120, 105, 65, 65, 60];
-        const headers = ['Rank', 'Faculty ID', 'Faculty name', 'College', 'Department', 'Positive', 'Negative', 'Net'];
+        const headers = ['Rank', 'Faculty ID', 'Faculty name', 'College', 'Department', 'Positive', 'Negative', 'Ranking'];
         const drawRow = (values, header = false) => { const y = doc.y; let x = 36; if (header) doc.rect(36, y - 3, 680, 18).fill('#001B70'); values.forEach((value, i) => { doc.font(header ? 'Helvetica-Bold' : 'Helvetica').fontSize(7).fillColor(header ? '#FFFFFF' : '#172033').text(String(value ?? ''), x + 3, y, { width: widths[i] - 6, ellipsis: true }); x += widths[i]; }); doc.y = y + 19; };
         drawRow(headers, true);
-        report.rows.forEach(row => { if (doc.y > 540) { doc.addPage(); drawRow(headers, true); } drawRow([row.rank, row.faculty.facultyID, `${row.faculty.prefix} ${row.faculty.name}`.trim(), row.faculty.college, row.faculty.department, row.positivePoints, row.negativePoints, row.netCredits]); });
+        report.rows.forEach(row => { if (doc.y > 540) { doc.addPage(); drawRow(headers, true); } drawRow([row.rank, row.faculty.facultyID, `${row.faculty.prefix} ${row.faculty.name}`.trim(), row.faculty.college, row.faculty.department, row.positivePoints, row.negativePoints, row.rankingPoints]); });
         if (!report.rows.length) doc.text('No faculty records matched the selected filters.');
         doc.end();
       });
