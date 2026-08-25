@@ -127,17 +127,20 @@ async function addExcelVerificationSheet(workbook, verification) {
 }
 
 function addPdfVerification(doc, verification, options = {}) {
-  if (doc.y > 610) doc.addPage();
+  if (doc.y > 590) doc.addPage();
   const y = Math.max(doc.y + 12, options.y || 0);
   doc.moveTo(36, y).lineTo(doc.page.width - 36, y).strokeColor('#d7dce5').lineWidth(0.5).stroke();
-  doc.font('Helvetica-Bold').fontSize(10).fillColor('#001b70').text('Digital Verification', 36, y + 10);
+  doc.font('Helvetica-Bold').fontSize(10).fillColor('#001b70').text('SIGNED EXPORT VERIFICATION', 36, y + 10);
   doc.image(verification.qrPng, 36, y + 28, { width: 82, height: 82 });
   doc.font('Helvetica').fontSize(7).fillColor('#333').text(`Document ID: ${verification.documentId}`, 128, y + 30, { width: 420 });
-  doc.text(`Issued: ${verification.issuedAt}`, 128, y + 42, { width: 420 });
-  doc.text(`Content SHA-256: ${verification.contentHash}`, 128, y + 54, { width: 420 });
-  doc.text(`Signature (${verification.algorithm}): ${verification.signature}`, 128, y + 66, { width: 420 });
-  doc.fillColor('#001b70').text(verification.verificationUrl, 128, y + 88, { width: 420, link: verification.verificationUrl, underline: true });
-  doc.y = y + 122;
+  doc.text(`Issued At (ISO): ${verification.issuedAt}`, 128, y + 41, { width: 420 });
+  doc.text(`Document Type: ${verification.documentType}`, 128, y + 52, { width: 420 });
+  doc.text(`Content SHA-256: ${verification.contentHash}`, 128, y + 63, { width: 420 });
+  doc.text(`Signature Algorithm: ${verification.algorithm}`, 128, y + 74, { width: 420 });
+  doc.text(`Digital Signature: ${verification.signature}`, 128, y + 85, { width: 420 });
+  doc.fillColor('#001b70').text(`Verification URL: ${verification.verificationUrl}`, 128, y + 101, { width: 420, link: verification.verificationUrl, underline: true });
+  doc.font('Helvetica').fontSize(6.5).fillColor('#667085').text('Scan the QR code or open the verification URL to validate this export.', 36, y + 117, { width: 512 });
+  doc.y = y + 136;
 }
 
 module.exports = {

@@ -186,6 +186,23 @@ async function exportFacultyRanking(req, res, next) {
     if (!['pdf', 'excel'].includes(format)) return res.status(400).json({ success: false, message: 'format must be pdf or excel' });
     const report = await loadFacultyRanking(req.query);
     const title = 'Faculty Credit Ranking Ledger';
+    const generatedBy = req.user?.name || 'Administrator';
+    const verification = await createExportVerification({
+      documentType: 'faculty_credit_ranking_ledger',
+      subject: {
+        scope: report.filters.groupBy,
+        college: report.filters.college || 'All',
+        department: report.filters.department || 'All',
+        creditType: report.filters.type,
+      },
+      totals: {
+        faculty: report.summary.facultyCount,
+        positive: report.summary.positivePoints,
+        negative: report.summary.negativePoints,
+        net: report.summary.netCredits,
+      },
+      content: { report, generatedBy },
+    });
     let buffer;
     if (format === 'excel') {
       const workbook = new ExcelJS.Workbook();
@@ -200,6 +217,7 @@ async function exportFacultyRanking(req, res, next) {
       sheet.getRow(5).font = { bold: true, color: { argb: 'FFFFFFFF' } };
       sheet.getRow(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF001B70' } };
       sheet.views = [{ state: 'frozen', ySplit: 5 }];
+      await addExcelVerificationSheet(workbook, verification);
       buffer = Buffer.from(await workbook.xlsx.writeBuffer());
     } else {
       buffer = await new Promise((resolve, reject) => {
@@ -214,12 +232,15 @@ async function exportFacultyRanking(req, res, next) {
         drawRow(headers, true);
         report.rows.forEach(row => { if (doc.y > 540) { doc.addPage(); drawRow(headers, true); } drawRow([row.rank, row.faculty.facultyID, `${row.faculty.prefix} ${row.faculty.name}`.trim(), row.faculty.college, row.faculty.department, row.positivePoints, row.negativePoints, row.rankingPoints]); });
         if (!report.rows.length) doc.text('No faculty records matched the selected filters.');
+        addPdfVerification(doc, verification);
         doc.end();
       });
     }
     const ext = format === 'excel' ? 'xlsx' : 'pdf';
     res.setHeader('Content-Type', format === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="EGSPGOI_Faculty_Ranking_${new Date().toISOString().slice(0, 10)}.${ext}"`);
+    res.setHeader('X-FCS-Document-ID', verification.documentId);
+    res.setHeader('X-FCS-Content-SHA256', verification.contentHash);
     res.send(buffer);
   } catch (error) { next(error); }
 }
