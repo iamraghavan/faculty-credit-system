@@ -2,6 +2,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../Models/User');
+const { sanitizeUser } = require('../utils/sanitizeUser');
 const { generateFacultyID, generateApiKey } = require('../utils/generateID');
 const { recalcFacultyCredits } = require('../utils/calculateCredits');
 const multer = require('multer');
@@ -933,8 +934,7 @@ async function getProfile(req, res, next) {
     }
 
     // Remove password from user object if it exists (DynamoDB items are plain objects)
-    const userObj = { ...user };
-    delete userObj.password;
+    const userObj = sanitizeUser(user);
 
     // Fetch sessions
     const sessions = await Session.findByUserId(userId);

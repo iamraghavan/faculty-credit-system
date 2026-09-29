@@ -12,12 +12,10 @@ const ROLE_PERMISSIONS = Object.freeze({
     'notification.broadcast',
   ],
   oa: [
-    'user.read', 'profile.read:self', 'profile.update:self', 'profile.read:any',
-    'credit.read:any', 'credit.review', 'credit.issue',
+    'user.read:faculty', 'profile.read:self', 'profile.update:self',
+    'credit.read:own-issued', 'credit.edit:own-issued', 'credit.void:own-issued', 'credit.issue',
     'credit.title.read',
-    'appeal.read:any', 'appeal.resolve',
-    'report.read', 'report.export', 'policy.read', 'export.official',
-    'notification.broadcast',
+    'appeal.read:own-issued', 'policy.read',
   ],
   faculty: [
     'profile.read:self', 'profile.update:self',
@@ -31,7 +29,9 @@ function permissionsFor(user) {
   const rolePermissions = ROLE_PERMISSIONS[user?.role] || [];
   const overrides = Array.isArray(user?.permissionOverrides) ? user.permissionOverrides : [];
   const denied = new Set(overrides.filter(value => String(value).startsWith('-')).map(value => String(value).slice(1)));
-  return [...new Set([...rolePermissions, ...overrides.filter(value => !String(value).startsWith('-'))])]
+  const grants = ['admin', 'superadmin'].includes(user?.role)
+    ? overrides.filter(value => !String(value).startsWith('-')) : [];
+  return [...new Set([...rolePermissions, ...grants])]
     .filter(permission => !denied.has(permission));
 }
 

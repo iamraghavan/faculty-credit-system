@@ -6,7 +6,6 @@ const {
     GetCommand,
     ScanCommand,
     UpdateCommand,
-    DeleteCommand,
     QueryCommand
 } = require('@aws-sdk/lib-dynamodb');
 
@@ -104,11 +103,7 @@ module.exports = {
      * Delete session
      */
     async delete(id) {
-        const client = getDynamoClient();
-        await client.send(
-            new DeleteCommand({ TableName: TABLE, Key: { _id: id } })
-        );
-        return { deleted: true };
+        return this.revoke(id);
     },
 
     /**
@@ -117,13 +112,7 @@ module.exports = {
     async deleteByUserId(userId) {
         const sessions = await this.findByUserId(userId);
         if (sessions.length > 0) {
-            const client = getDynamoClient();
-            // Delete in parallel
-            await Promise.all(
-                sessions.map((s) =>
-                    client.send(new DeleteCommand({ TableName: TABLE, Key: { _id: s._id } }))
-                )
-            );
+            await Promise.all(sessions.map((session) => this.revoke(session._id)));
         }
         return { deletedCount: sessions.length };
     }

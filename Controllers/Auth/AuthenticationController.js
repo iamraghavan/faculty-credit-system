@@ -43,15 +43,13 @@ async function register(req, res, next) {
 
     // Role Logic
     let assignedRole = 'faculty';
-    const allUsers = await User.find(); // Expensive check for "first user", ideally use a count or config
-    if (allUsers.length === 0) {
-      if (['admin', 'oa'].includes(role)) assignedRole = role;
-    } else if (req.user?.role === 'admin') {
-      assignedRole = role || 'faculty';
+    if (['admin', 'superadmin'].includes(req.user?.role)) assignedRole = role || 'faculty';
+    if (assignedRole === 'faculty' && !String(department || '').trim()) {
+      return res.status(400).json({ success: false, message: 'Faculty department is required' });
     }
 
     // Hash Password
-    const hashed = await bcrypt.hash(password, 10);
+    const hashed = await bcrypt.hash(password, 12);
 
     const newUser = await User.create({
       name,
@@ -62,6 +60,8 @@ async function register(req, res, next) {
       facultyID: generateFacultyID(college),
       apiKey: generateApiKey(),
       role: assignedRole,
+      isActive: true,
+      createdBy: String(req.user._id),
       fcmToken: fcmToken || null,
       currentCredit: 0,
       creditsByYear: {},

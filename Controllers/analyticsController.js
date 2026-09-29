@@ -1,6 +1,7 @@
 const User = require('../Models/User');
 const Credit = require('../Models/Credit');
 const CreditTitle = require('../Models/CreditTitle');
+const { creditImpact } = require('../domain/creditAccounting');
 
 exports.getUserAnalytics = async (req, res, next) => {
   try {
@@ -50,15 +51,16 @@ exports.getCreditAnalytics = async (req, res, next) => {
     let totalPoints = 0;
 
     for (const c of credits) {
+      const impact = creditImpact(c).points;
       byStatus[c.status] = (byStatus[c.status] || 0) + 1;
       byType[c.type] = (byType[c.type] || 0) + 1;
-      totalPoints += c.points || 0;
+      totalPoints += impact;
 
       const month = new Date(c.createdAt).toISOString().slice(0, 7);
       byMonth[month] = (byMonth[month] || 0) + 1;
 
       const facultyId = c.faculty || 'Unknown';
-      facultyPoints[facultyId] = (facultyPoints[facultyId] || 0) + (c.points || 0);
+      facultyPoints[facultyId] = (facultyPoints[facultyId] || 0) + impact;
 
       if (c.appealCount > 0) appealCount++;
     }
@@ -137,7 +139,7 @@ exports.getAcademicYearInsights = async (req, res, next) => {
     for (const c of credits) {
       const year = c.academicYear || 'Unknown';
       const dept = c.facultySnapshot?.department || 'Unknown';
-      const pts = c.points || 0;
+      const pts = creditImpact(c).points;
 
       if (!byYear[year]) byYear[year] = { totalCredits: 0, totalPoints: 0 };
       byYear[year].totalCredits++;

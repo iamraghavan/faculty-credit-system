@@ -40,7 +40,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(helmet({
   contentSecurityPolicy: false // Disable CSP so Swagger UI CDNs can load on Vercel
 }));
-app.use(cors());
+app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
 // app.use(mongoSanitize());
 
 // Logging
@@ -96,7 +96,7 @@ app.get('/firebase-messaging-sw.js', (req, res) => {
 
 // Redirect root and /login routes
 app.get(['/', '/login'], (req, res) => {
-  res.redirect('https://fcs.egspgroup.in/u/portal/auth?faculty_login');
+  res.redirect(`${process.env.FRONTEND_URL || 'https://fcs.egspgroup.in'}/u/portal/auth?faculty_login`);
 });
 
 // API routes

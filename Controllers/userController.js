@@ -1,13 +1,13 @@
 const bcrypt = require('bcryptjs');
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 const User = require('../Models/User');
+const { sanitizeUser } = require('../utils/sanitizeUser');
 const Credit = require('../Models/Credit');
 const {
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
   UpdateCommand,
-  DeleteCommand,
   ScanCommand,
   QueryCommand,
 } = require("@aws-sdk/lib-dynamodb");
@@ -59,8 +59,7 @@ async function getProfile(req, res, next) {
        return res.status(404).json({ success: false, message: 'User profile not found' });
     }
 
-    delete result.Item.password;
-    res.json({ success: true, data: result.Item });
+    res.json({ success: true, data: sanitizeUser(result.Item) });
   } catch (err) {
     next(err);
   }
@@ -196,8 +195,7 @@ async function getUserById(req, res, next) {
     const params = { TableName: TABLE_NAME, Key: { _id: req.params.id } };
     const result = await ddbDocClient.send(new GetCommand(params));
     if (!result.Item) return res.status(404).json({ success: false, message: 'User not found' });
-    delete result.Item.password;
-    res.json({ success: true, data: result.Item });
+    res.json({ success: true, data: sanitizeUser(result.Item) });
   } catch (err) {
     next(err);
   }
@@ -209,8 +207,13 @@ async function getUserById(req, res, next) {
 async function deleteUser(req, res, next) {
   try {
     const params = { TableName: TABLE_NAME, Key: { _id: req.params.id } };
-    await ddbDocClient.send(new DeleteCommand(params));
-    res.json({ success: true, message: 'User deleted successfully' });
+    await ddbDocClient.send(new UpdateCommand({ ...params,
+      UpdateExpression: 'SET isActive = :inactive, deactivatedAt = :at, deactivatedBy = :actor',
+      ConditionExpression: 'attribute_exists(#id)',
+      ExpressionAttributeNames: { '#id': '_id' },
+      ExpressionAttributeValues: { ':inactive': false, ':at': new Date().toISOString(), ':actor': String(req.user._id) },
+    }));
+    res.json({ success: true, message: 'Account deactivated; data preserved' });
   } catch (err) {
     next(err);
   }

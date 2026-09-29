@@ -4,7 +4,6 @@ require('dotenv').config();
 const {
     PutCommand,
     GetCommand,
-    DeleteCommand,
     UpdateCommand,
 } = require('@aws-sdk/lib-dynamodb');
 
@@ -67,9 +66,12 @@ module.exports = {
      */
     async delete(id) {
         const client = getDynamoClient();
-        await client.send(
-            new DeleteCommand({ TableName: TABLE, Key: { _id: id } })
-        );
-        return { deleted: true };
+        await client.send(new UpdateCommand({ TableName: TABLE, Key: { _id: id },
+            UpdateExpression: 'SET isActive = :inactive, archivedAt = :at',
+            ConditionExpression: 'attribute_exists(#id)',
+            ExpressionAttributeNames: { '#id': '_id' },
+            ExpressionAttributeValues: { ':inactive': false, ':at': new Date().toISOString() },
+        }));
+        return { archived: true };
     },
 };

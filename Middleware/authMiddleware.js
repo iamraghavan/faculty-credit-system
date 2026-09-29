@@ -72,6 +72,14 @@ function requirePermission(permission) {
   };
 }
 
+function requireAnyPermission(...permissions) {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ success: false, message: 'Unauthorized' });
+    if (permissions.some(permission => hasPermission(req.user, permission))) return next();
+    return res.status(403).json({ success: false, message: 'Insufficient permissions' });
+  };
+}
+
 function requireSelfOrPermission(paramName, permission) {
   return (req, res, next) => {
     const requestedId = String(req.params[paramName]);
@@ -82,4 +90,4 @@ function requireSelfOrPermission(paramName, permission) {
 }
 
 
-module.exports = { adminOrOA, oaAlso, authMiddleware, AdminMiddleware, adminOnly, requirePermission, requireSelfOrPermission };
+module.exports = { adminOrOA, oaAlso, authMiddleware, AdminMiddleware, adminOnly, requirePermission, requireAnyPermission, requireSelfOrPermission };

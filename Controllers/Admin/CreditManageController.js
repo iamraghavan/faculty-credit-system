@@ -27,13 +27,19 @@ async function issueNegativeCredit(req, res, next) {
     // faculty lookup
     const faculty = await User.findById(facultyId);
     if (!faculty) return res.status(404).json({ success: false, message: 'Faculty not found' });
+    if (faculty.role !== 'faculty' || faculty.isActive === false) return res.status(400).json({ success: false, message: 'Select an active faculty account' });
 
     // credit title lookup
     let creditTitle = null;
     if (creditTitleId) {
       creditTitle = await CreditTitle.findById(creditTitleId);
       if (!creditTitle) return res.status(404).json({ success: false, message: 'Credit title not found' });
+      if (creditTitle.type !== 'negative' || creditTitle.isActive === false) return res.status(400).json({ success: false, message: 'Select an active negative credit title' });
     }
+    if (!creditTitle) return res.status(400).json({ success: false, message: 'Negative credits require a credit title' });
+    const negativePoints = Math.abs(Number(creditTitle.points));
+    const maxPoints = Math.max(1, Number(process.env.MAX_ISSUED_CREDIT_POINTS) || 10000);
+    if (!Number.isFinite(negativePoints) || negativePoints <= 0 || negativePoints > maxPoints) return res.status(400).json({ success: false, message: 'Credit title points are invalid' });
 
     // File upload
     let proofUrl, proofMeta;
@@ -53,8 +59,8 @@ async function issueNegativeCredit(req, res, next) {
       },
       type: 'negative',
       creditTitle: creditTitle ? String(creditTitle._id) : undefined,
-      title: title || (creditTitle && creditTitle.title) || 'Negative Credit',
-      points: points !== undefined ? Number(points) : (creditTitle ? -Math.abs(creditTitle.points) : 0),
+      title: creditTitle.title,
+      points: -negativePoints,
       notes,
       academicYear,
       issuedBy: String(admin._id),
@@ -102,13 +108,19 @@ async function issuePositiveCredit(req, res, next) {
     // faculty lookup
     const faculty = await User.findById(facultyId);
     if (!faculty) return res.status(404).json({ success: false, message: 'Faculty not found' });
+    if (faculty.role !== 'faculty' || faculty.isActive === false) return res.status(400).json({ success: false, message: 'Select an active faculty account' });
 
     // credit title lookup (optional)
     let creditTitle = null;
     if (creditTitleId) {
       creditTitle = await CreditTitle.findById(creditTitleId);
       if (!creditTitle) return res.status(404).json({ success: false, message: 'Credit title not found' });
+      if (creditTitle.type !== 'positive' || creditTitle.isActive === false) return res.status(400).json({ success: false, message: 'Select an active positive credit title' });
     }
+    const positivePoints = creditTitle ? Math.abs(Number(creditTitle.points)) : Number(points);
+    const maxPoints = Math.max(1, Number(process.env.MAX_ISSUED_CREDIT_POINTS) || 10000);
+    if (!Number.isFinite(positivePoints) || positivePoints <= 0 || positivePoints > maxPoints) return res.status(400).json({ success: false, message: 'Positive points must be greater than zero and within the configured limit' });
+    if (!creditTitle && !String(title || '').trim()) return res.status(400).json({ success: false, message: 'A title is required for a manual positive award' });
 
     // File upload
     let proofUrl, proofMeta;
@@ -129,8 +141,8 @@ async function issuePositiveCredit(req, res, next) {
       },
       type: 'positive',
       creditTitle: creditTitle ? String(creditTitle._id) : undefined,
-      title: title || (creditTitle && creditTitle.title) || 'Direct Award',
-      points: points !== undefined ? Number(points) : (creditTitle ? Math.abs(Number(creditTitle.points)) : 0),
+      title: creditTitle ? creditTitle.title : String(title).trim(),
+      points: positivePoints,
       notes: notes || 'Directly awarded by Admin/OA',
       academicYear,
       issuedBy: String(actor._id),
@@ -162,4 +174,27 @@ async function issuePositiveCredit(req, res, next) {
   }
 }
 
-module.exports = { issueNegativeCredit, issuePositiveCredit };
+async function voidPositiveCredit(req, res, next) {
+  try {
+    await connectDB();
+    const credit = await Credit.findById(req.params.id);
+    if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
+    if (credit.type !== 'positive') return res.status(400).json({ success: false, message: 'Only positive credits can be voided here' });
+    if (credit.status === 'deleted') return res.status(409).json({ success: false, message: 'Credit is already voided' });
+    const reason = String(req.body?.reason || 'Voided by an administrator').trim().slice(0, 1000);
+    let updated;
+    try {
+      updated = await Credit.voidByActor(credit._id, req.user._id, credit.updatedAt,
+        { reason, before: { status: credit.status, points: credit.points }, after: { status: 'deleted', points: 0 } });
+    } catch (error) {
+      if (error.name === 'ConditionalCheckFailedException') return res.status(409).json({ success: false, message: 'Credit changed; reload and try again' });
+      throw error;
+    }
+    let balanceUpdated = true;
+    try { await recalcFacultyCredits(String(credit.faculty)); }
+    catch (error) { balanceUpdated = false; console.error('Positive credit voided but balance projection failed:', error); }
+    return res.json({ success: true, balanceUpdated, message: 'Credit voided; record preserved', data: updated });
+  } catch (error) { next(error); }
+}
+
+module.exports = { issueNegativeCredit, issuePositiveCredit, voidPositiveCredit };

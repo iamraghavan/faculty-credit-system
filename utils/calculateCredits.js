@@ -5,11 +5,10 @@ const _ = require('lodash');
 const { create, all } = require('mathjs');
 const Credit = require('../Models/Credit');
 const User = require('../Models/User');
+const { creditImpact } = require('../domain/creditAccounting');
 
 // Configure mathjs for high precision decimal arithmetic if needed
 const math = create(all, { precision: 16 });
-
-const EXCLUDE_STATUS = ['pending', 'deleted'];
 
 /**
  * Determine if this user object is from DynamoDB (plain object, no `.save()`).
@@ -35,15 +34,7 @@ async function fetchAndSortCredits(facultyId) {
   const credits = await Credit.find({ faculty: facultyId });
   if (!Array.isArray(credits)) throw new Error(`Credits fetch error for ${facultyId}`);
 
-  // Use Lodash to filter and sort
-  return _.chain(credits)
-    .filter(c => {
-      const status = _.get(c, 'status', '').toLowerCase();
-      const appealStatus = _.get(c, 'appeal.status', '').toLowerCase();
-      return !_.includes(EXCLUDE_STATUS, status) && !_.includes(EXCLUDE_STATUS, appealStatus);
-    })
-    .sortBy(c => new Date(c.createdAt))
-    .value();
+  return _.sortBy(credits, c => c.createdAt || '');
 }
 
 /**
@@ -56,15 +47,13 @@ function processCredits(credits) {
     totalPositive: math.bignumber(0),
     totalNegative: math.bignumber(0),
     eventsApplied: 0,
-    byYear: {}
+    byYear: {},
+    excludedByReason: {}
   };
 
   _.forEach(credits, (credit) => {
     const year = _.get(credit, 'academicYear', 'unknown');
-    const pts = math.bignumber(_.get(credit, 'points', 0));
-    const type = _.get(credit, 'type', '');
-    const status = _.get(credit, 'status', '').toLowerCase();
-    const appealStatus = _.get(credit, 'appeal.status', '').toLowerCase();
+    const impact = creditImpact(credit);
 
     // Ensure year entry exists
     if (!stats.byYear[year]) {
@@ -79,29 +68,25 @@ function processCredits(credits) {
 
     const yearData = stats.byYear[year];
 
-    if (type === 'positive' && status === 'approved') {
-      yearData.positive = math.add(yearData.positive, pts);
-      yearData.net = math.add(yearData.net, pts);
+    if (impact.points > 0) {
+      const amount = math.bignumber(impact.points);
+      yearData.positive = math.add(yearData.positive, amount);
+      yearData.net = math.add(yearData.net, amount);
       yearData.posCount++;
       
-      stats.totalPositive = math.add(stats.totalPositive, pts);
-      stats.runningTotal = math.add(stats.runningTotal, pts);
+      stats.totalPositive = math.add(stats.totalPositive, amount);
+      stats.runningTotal = math.add(stats.runningTotal, amount);
       stats.eventsApplied++;
-    } 
-    else if (type === 'negative') {
-      // Apply if (no appeal AND approved) OR (appeal AND rejected)
-      const shouldApply = appealStatus ? (appealStatus === 'rejected') : (status === 'approved');
-      
-      if (shouldApply) {
-        const deduction = math.abs(pts);
-        yearData.negative = math.add(yearData.negative, deduction);
-        yearData.net = math.subtract(yearData.net, deduction);
-        yearData.negCount++;
-
-        stats.totalNegative = math.add(stats.totalNegative, deduction);
-        stats.runningTotal = math.subtract(stats.runningTotal, deduction);
-        stats.eventsApplied++;
-      }
+    } else if (impact.points < 0) {
+      const deduction = math.bignumber(Math.abs(impact.points));
+      yearData.negative = math.add(yearData.negative, deduction);
+      yearData.net = math.subtract(yearData.net, deduction);
+      yearData.negCount++;
+      stats.totalNegative = math.add(stats.totalNegative, deduction);
+      stats.runningTotal = math.subtract(stats.runningTotal, deduction);
+      stats.eventsApplied++;
+    } else {
+      stats.excludedByReason[impact.reason] = (stats.excludedByReason[impact.reason] || 0) + 1;
     }
   });
 
@@ -111,6 +96,7 @@ function processCredits(credits) {
     totalPositive: math.number(stats.totalPositive),
     totalNegative: math.number(stats.totalNegative),
     eventsApplied: stats.eventsApplied,
+    excludedByReason: stats.excludedByReason,
     positiveByYear: _.mapValues(stats.byYear, y => math.number(y.positive)),
     negativeByYear: _.mapValues(stats.byYear, y => math.number(y.negative)),
     netByYear: _.mapValues(stats.byYear, y => math.number(y.net)),
@@ -125,7 +111,12 @@ function processCredits(credits) {
 async function updateUserCredits(user, metrics) {
   const updatePayload = {
     currentCredit: metrics.runningTotal,
+    totalPositiveCredit: metrics.totalPositive,
+    totalNegativeCredit: metrics.totalNegative,
     creditsByYear: metrics.netByYear,
+    positiveCreditsByYear: metrics.positiveByYear,
+    negativeCreditsByYear: metrics.negativeByYear,
+    creditCalculatedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
 
@@ -133,7 +124,12 @@ async function updateUserCredits(user, metrics) {
     await User.update(user._id, updatePayload);
   } else {
     user.currentCredit = metrics.runningTotal;
+    user.totalPositiveCredit = metrics.totalPositive;
+    user.totalNegativeCredit = metrics.totalNegative;
     user.creditsByYear = metrics.netByYear;
+    user.positiveCreditsByYear = metrics.positiveByYear;
+    user.negativeCreditsByYear = metrics.negativeByYear;
+    user.creditCalculatedAt = updatePayload.creditCalculatedAt;
     user.updatedAt = updatePayload.updatedAt;
     await user.save();
   }

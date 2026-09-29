@@ -911,7 +911,9 @@ async function getNegativeAppeals(req, res, next) {
       templateId = 'all',
       college = 'all',
       department = 'all',
-      sort = '-createdAt',
+      sort = '-appealDate',
+      submittedFrom = '',
+      submittedTo = '',
       search = ''
     } = req.query;
 
@@ -986,11 +988,28 @@ async function getNegativeAppeals(req, res, next) {
     }
 
     // 9️⃣ Sort
+    const appealDate = c => c.appeal?.submittedAt || c.appeal?.createdAt || '';
+    if (submittedFrom) {
+      const from = Date.parse(`${submittedFrom}T00:00:00`);
+      if (!Number.isFinite(from)) return res.status(400).json({ success: false, message: 'Invalid start date' });
+      items = items.filter(c => {
+        const date = Date.parse(appealDate(c));
+        return Number.isFinite(date) && date >= from;
+      });
+    }
+    if (submittedTo) {
+      const to = Date.parse(`${submittedTo}T23:59:59.999`);
+      if (!Number.isFinite(to)) return res.status(400).json({ success: false, message: 'Invalid end date' });
+      items = items.filter(c => {
+        const date = Date.parse(appealDate(c));
+        return Number.isFinite(date) && date <= to;
+      });
+    }
     const desc = String(sort).startsWith('-');
     const sortKey = desc ? sort.slice(1) : sort;
     items.sort((a, b) => {
-      const va = a[sortKey] || '';
-      const vb = b[sortKey] || '';
+      const va = sortKey === 'appealDate' ? appealDate(a) : a[sortKey] || '';
+      const vb = sortKey === 'appealDate' ? appealDate(b) : b[sortKey] || '';
       return desc
         ? String(vb).localeCompare(String(va))
         : String(va).localeCompare(String(vb));
@@ -1006,12 +1025,15 @@ async function getNegativeAppeals(req, res, next) {
       creditId: c._id,
       _id: c._id, // explicitly include credit _id for consistency
       title: c.title || '',
+      notes: c.notes || '',
       creditTitle: c.creditTitle || '',
       type: c.type || '',
       points: c.points || 0,
       categories: c.categories || [],
       proofMeta: c.proofMeta || null,
-      proofUrl: c.proofUrl || '',
+      proofUrl: c.appeal?.proofUrl || c.proofUrl || '',
+      creditProofUrl: c.proofUrl || '',
+      appealProofUrl: c.appeal?.proofUrl || '',
       issuedBy: c.issuedBy || '',
       status: c.status || '',
       academicYear: c.academicYear || '',
@@ -1031,7 +1053,8 @@ async function getNegativeAppeals(req, res, next) {
       appeal: {
         status: c.appeal?.status || '',
         reason: c.appeal?.reason || '',
-        submittedAt: c.appeal?.submittedAt || '',
+        submittedAt: appealDate(c),
+        decisionNotes: c.appeal?.notes || '',
         response: c.appeal?.response || '',
         reviewedBy: c.appeal?.reviewedBy || '',
         updatedAt: c.appeal?.updatedAt || ''
@@ -1097,31 +1120,33 @@ async function adminUpdateAppealStatus(req, res, next) {
 
     const credit = await Credit.findById(creditId);
     if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
+    if (credit.type !== 'negative') return res.status(400).json({ success: false, message: 'Appeals can only change negative credits' });
+    if (credit.status === 'deleted') return res.status(409).json({ success: false, message: 'A voided credit cannot have its appeal decided' });
 
     if (!credit.appeal || !credit.appeal.by) return res.status(400).json({ success: false, message: 'No appeal found for this credit' });
+    if (credit.appeal.status !== 'pending') return res.status(409).json({ success: false, message: 'This appeal has already been decided' });
 
-    // Update appeal object and credit status if needed
-    const newAppeal = {
-      ...credit.appeal,
-      status,
-      updatedAt: new Date().toISOString(),
-      notes: notes || credit.appeal.notes,
-    };
-
-    const updatePayload = {
-      appeal: newAppeal,
-      notes: notes || credit.notes || undefined,
-      updatedAt: new Date().toISOString(),
-    };
-
-    // If appeal accepted, set credit.status to 'pending' for re-review (preserve previous logic)
-    if (status === 'accepted' && credit.status !== 'pending') {
-      updatePayload.status = 'pending';
+    let updated;
+    try {
+      updated = await Credit.decideAppeal(creditId, {
+        decision: status,
+        notes: typeof notes === 'string' ? notes.trim() : '',
+        creditStatus: status === 'accepted' ? 'rejected' : 'approved',
+        reviewedBy: req.user?._id,
+      });
+    } catch (error) {
+      if (error.name === 'ConditionalCheckFailedException') {
+        return res.status(409).json({ success: false, message: 'This appeal has already been decided' });
+      }
+      throw error;
     }
-
-    await Credit.update(creditId, updatePayload);
-
-    const updated = await Credit.findById(creditId);
+    let balanceUpdated = true;
+    try {
+      await recalcFacultyCredits(String(credit.faculty));
+    } catch (error) {
+      balanceUpdated = false;
+      console.error('Appeal decided but faculty balance recalculation failed:', error);
+    }
 
     // Emit socket event if needed
     emitSocket(req, 'credit:appeal:update', { creditId: updated._id, appeal: updated.appeal });
@@ -1140,7 +1165,7 @@ async function adminUpdateAppealStatus(req, res, next) {
       });
     }
 
-    return res.json({ success: true, data: updated });
+    return res.json({ success: true, balanceUpdated, data: updated });
   } catch (err) {
     next(err);
   }
@@ -1179,6 +1204,7 @@ async function adminUpdateAppealStatus(req, res, next) {
  */
 async function oaGetOwnIssuedCredits(req, res, next) {
   try {
+    await ensureDb();
     const user = req.user;
     if (!user || !user._id) {
       return res.status(401).json({ success: false, message: 'Unauthorized' });
@@ -1228,16 +1254,16 @@ async function oaGetOwnIssuedCredits(req, res, next) {
     const baseFilter = { issuedBy: user._id };
 
     // Quick pass-through for type/status/academicYear (these go to the DB scan filter)
-    if (req.query.type) baseFilter.type = req.query.type;
-    if (req.query.status) baseFilter.status = req.query.status;
-    if (req.query.academicYear) baseFilter.academicYear = req.query.academicYear;
+    if (req.query.type && !String(req.query.type).includes(',') && req.query.type !== 'all') baseFilter.type = req.query.type;
+    if (req.query.status && !String(req.query.status).includes(',') && req.query.status !== 'all') baseFilter.status = req.query.status;
+    if (req.query.academicYear && !String(req.query.academicYear).includes(',') && req.query.academicYear !== 'all') baseFilter.academicYear = req.query.academicYear;
 
     // Fetch candidate set (this will scan then apply the simple baseFilter)
     const candidates = await Credit.find(baseFilter); // returns array
 
     // If no items, return early
     if (!candidates || candidates.length === 0) {
-      return res.json({ success: true, data: { total: 0, page, limit, items: [], aggregates: {} } });
+      return res.json({ success: true, data: { totalFiltered: 0, totalAvailable: 0, page, limit, items: [], aggregates: {}, filters: { years: [] } } });
     }
 
     // Prepare richer filters (in-memory)
@@ -1413,6 +1439,7 @@ async function oaGetOwnIssuedCredits(req, res, next) {
         page,
         limit,
         items: itemsWithSnapshot,
+        filters: { years: [...new Set(candidates.map(item => item.academicYear).filter(Boolean))].sort().reverse() },
         aggregates, // byType and byStatus
       },
     });
@@ -1450,7 +1477,7 @@ async function oaDeleteIssuedCredit(req, res, next) {
   try {
     const user = req.user;
     const { id } = req.params;
-    const softDelete = String(req.query.soft || 'false').toLowerCase() === 'true';
+    const softDelete = true;
     const waitForEmail = String(req.query.waitForEmail || 'false').toLowerCase() === 'true';
 
     if (!user || !user._id) {
@@ -1516,7 +1543,7 @@ async function oaDeleteIssuedCredit(req, res, next) {
 
     const oaName = user.name || String(user._id) || 'OA user';
     const deletedAt = new Date().toISOString();
-    const deleteMode = softDelete ? 'soft' : 'hard';
+    const deleteMode = 'soft';
 
     // perform delete (soft or hard)
     if (softDelete) {
@@ -1526,13 +1553,6 @@ async function oaDeleteIssuedCredit(req, res, next) {
       } catch (e) {
         console.error('Soft-delete failed', { creditId: id, err: e && e.message });
         return res.status(500).json({ success: false, message: 'Failed to soft-delete credit' });
-      }
-    } else {
-      try {
-        await Credit.delete(id);
-      } catch (e) {
-        console.error('Hard delete failed', { creditId: id, err: e && e.message });
-        return res.status(500).json({ success: false, message: 'Failed to delete credit' });
       }
     }
 
@@ -1667,6 +1687,10 @@ async function adminReopenAppealWindow(req, res, next) {
     await ensureDb();
     const credit = await Credit.findById(creditId);
     if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
+    if (credit.status === 'deleted') return res.status(409).json({ success: false, message: 'Voided credits cannot be changed' });
+    if (req.user.role === 'oa' && String(credit.issuedBy) !== String(req.user._id)) {
+      return res.status(403).json({ success: false, message: 'You can manage only credits you issued' });
+    }
     if (credit.type !== 'negative') {
       return res.status(400).json({ success: false, message: 'Only negative credits can have appeals re-opened' });
     }
@@ -1715,6 +1739,5 @@ module.exports = {
   adminUpdateAppealStatus,
   getNegativeAppeals,
   oaGetOwnIssuedCredits,
-  oaDeleteIssuedCredit,
   adminReopenAppealWindow
 };

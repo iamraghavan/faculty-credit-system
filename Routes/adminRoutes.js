@@ -13,7 +13,6 @@ const {
   adminUpdateAppealStatus,
   getNegativeAppeals,
   oaGetOwnIssuedCredits,
-  oaDeleteIssuedCredit,
   listNegativeCreditsForFaculty,
   adminReopenAppealWindow
 } = require('../Controllers/adminController');
@@ -32,11 +31,13 @@ const {
 
 const {
   issueNegativeCredit,
-  issuePositiveCredit
+  issuePositiveCredit,
+  voidPositiveCredit
 } = require('../Controllers/Admin/CreditManageController');
 
 
-const { authMiddleware, adminOnly, adminOrOA } = require('../Middleware/authMiddleware');
+const { authMiddleware, adminOnly, adminOrOA, requirePermission, requireSelfOrPermission } = require('../Middleware/authMiddleware');
+const { updateOwnIssuedCredit, voidOwnIssuedCredit } = require('../Controllers/oaCreditController');
 const { getFacultyLedger, exportFacultyLedger, getFacultyRanking, exportFacultyRanking } = require('../Controllers/facultyLedgerController');
 
 // Configure multer to use memory storage (serverless-safe)
@@ -69,6 +70,7 @@ router.get('/credits/positive', authMiddleware, adminOnly, listPositiveCreditsFo
 router.get('/credits/positive/:id', authMiddleware, adminOnly, getPositiveCreditById);
 router.put('/credits/positive/:id/status', authMiddleware, adminOnly, updatePositiveCreditStatus);
 router.post('/credits/positive', authMiddleware, adminOrOA, upload.single('proof'), issuePositiveCredit);
+router.delete('/credits/positive/:id', authMiddleware, adminOnly, voidPositiveCredit);
 
 /**
  * Negative credits issued by admin to faculty
@@ -78,20 +80,21 @@ router.post('/credits/negative', authMiddleware, adminOrOA, upload.single('proof
 /**
  * Faculty negative credits endpoint (frontend-friendly)
  */
-router.get('/faculty/:facultyId/credits/negative', authMiddleware, listNegativeCreditsForFaculty);
+router.get('/faculty/:facultyId/credits/negative', authMiddleware, requireSelfOrPermission('facultyId', 'credit.read:any'), listNegativeCreditsForFaculty);
 
 // GET /api/v1/admin/credits/negative
-router.get('/credits/negative', authMiddleware, adminOrOA, adminListNegativeCredits);
+router.get('/credits/negative', authMiddleware, adminOnly, adminListNegativeCredits);
+router.get('/credits/negative/appeals', authMiddleware, adminOnly, adminListNegativeCreditAppeals);
 
 // GET /api/v1/admin/credits/negative/:id
-router.get('/credits/negative/:id', adminGetNegativeCreditById);
+router.get('/credits/negative/:id', authMiddleware, adminOnly, adminGetNegativeCreditById);
 
 // GET /api/v1/admin/credits/negative/:id/faculty
-router.get('/credits/negative/:id/faculty', adminGetFacultyByNegativeCreditId);
+router.get('/credits/negative/:id/faculty', authMiddleware, adminOnly, adminGetFacultyByNegativeCreditId);
 
 
 
-router.get('/credits/negative/appeals/all', getNegativeAppeals);
+router.get('/credits/negative/appeals/all', authMiddleware, adminOnly, getNegativeAppeals);
 
 
 // Get appeal details by creditId
@@ -100,16 +103,14 @@ router.get('/credits/negative/:creditId/appeal', authMiddleware, adminOnly, admi
 // Update appeal status (accept/reject)
 router.put('/credits/negative/:creditId/appeal', authMiddleware, adminOnly, adminUpdateAppealStatus);
 
-// Admin: list all negative appeals
-router.get('/credits/negative/appeals', authMiddleware, adminOnly, adminListNegativeCreditAppeals);
-
 // Admin/OA: Re-open appeal window for a specific credit
 router.patch(['/credits/negative/:creditId/reopen', '/credits/credits/negative/:creditId/reopen'], authMiddleware, adminOrOA, adminReopenAppealWindow);
 
 // OA-only endpoint: get credits issued by the logged-in OA
-router.get('/oa/credits/issued', authMiddleware, adminOrOA, oaGetOwnIssuedCredits);
+router.get('/oa/credits/issued', authMiddleware, requirePermission('credit.read:own-issued'), oaGetOwnIssuedCredits);
 
-router.delete('/oa/credits/issued/:id', authMiddleware, adminOrOA, oaDeleteIssuedCredit);
+router.patch('/oa/credits/issued/:id', authMiddleware, requirePermission('credit.edit:own-issued'), upload.single('proof'), updateOwnIssuedCredit);
+router.delete('/oa/credits/issued/:id', authMiddleware, requirePermission('credit.void:own-issued'), voidOwnIssuedCredit);
 
 // Admin: individual faculty credit ledger and professional-detail exports
 router.get('/faculty/:facultyId/credit-ledger', authMiddleware, adminOnly, getFacultyLedger);

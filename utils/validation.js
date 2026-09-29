@@ -36,7 +36,7 @@ const schemas = {
     register: Joi.object({
       name: Joi.string().required(),
       email: Joi.string().email().required(),
-      password: Joi.string().min(6).required(),
+      password: Joi.string().min(12).max(128).required(),
       college: Joi.string().required(),
       department: Joi.string().optional(),
       role: Joi.string().valid('admin', 'faculty', 'oa').optional(),

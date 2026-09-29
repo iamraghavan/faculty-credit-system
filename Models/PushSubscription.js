@@ -1,5 +1,5 @@
 const { getDynamoClient } = require('../config/db');
-const { PutCommand, QueryCommand, DeleteCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
+const { PutCommand, QueryCommand, UpdateCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
 require('dotenv').config();
 
 const TABLE = process.env.DYNAMO_DB_SUBSCRIPTIONS || 'PushSubscriptions';
@@ -17,6 +17,7 @@ module.exports = {
             keys: data.keys,
             userId: data.userId,
             userAgent: data.userAgent || 'Unknown',
+            isActive: true,
             createdAt: new Date().toISOString(),
         };
 
@@ -42,7 +43,7 @@ module.exports = {
         };
 
         const res = await client.send(new ScanCommand(params));
-        return res.Items || [];
+        return (res.Items || []).filter(item => item.isActive !== false);
     },
 
     /**
@@ -50,8 +51,12 @@ module.exports = {
      */
     async delete(endpoint) {
         const client = getDynamoClient();
-        await client.send(new DeleteCommand({ TableName: TABLE, Key: { endpoint } }));
-        return { deleted: true };
+        await client.send(new UpdateCommand({ TableName: TABLE, Key: { endpoint },
+            UpdateExpression: 'SET isActive = :inactive, archivedAt = :at',
+            ConditionExpression: 'attribute_exists(endpoint)',
+            ExpressionAttributeValues: { ':inactive': false, ':at': new Date().toISOString() },
+        }));
+        return { archived: true };
     },
 
     /**
@@ -60,6 +65,6 @@ module.exports = {
     async getAll() {
         const client = getDynamoClient();
         const res = await client.send(new ScanCommand({ TableName: TABLE }));
-        return res.Items || [];
+        return (res.Items || []).filter(item => item.isActive !== false);
     }
 };

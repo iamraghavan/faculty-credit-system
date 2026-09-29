@@ -8,7 +8,8 @@ const { handleFileUpload } = require('../utils/fileUpload');
 const { sendEmail } = require('../utils/email');
 const { generateRemarkPdf } = require('../utils/pdfGenerator');
 const { sendPushToUser } = require('../Controllers/pushController');
-const { recalcFacultyCredits } = require('../utils/calculateCredits');
+const { recalcFacultyCredits, processCredits } = require('../utils/calculateCredits');
+const { creditImpact } = require('../domain/creditAccounting');
 const io = require('../socket');
 const { connectDB } = require('../config/db');
 const { sendWhatsAppMessage } = require('../utils/whatsapp');
@@ -32,8 +33,12 @@ const { createMaskedUrl, createShortLink } = require('../utils/urlHelper');
  * Helper to calculate appeal eligibility
  */
 function getAppealEligibility(credit) {
+  if (credit.status === 'deleted') return { canAppeal: false, reason: 'Voided credits cannot be appealed' };
   if (credit.type !== 'negative') {
     return { canAppeal: false, reason: 'Only negative credits can be appealed' };
+  }
+  if (credit.appeal?.status === 'accepted') {
+    return { canAppeal: false, reason: 'This negative credit was voided after the appeal was accepted' };
   }
 
   // 1. Check attempt count
@@ -158,15 +163,19 @@ async function adminIssueNegativeCredit(req, res, next) {
     // find faculty (User model assumed mongoose)
     const faculty = await User.findById(facultyId);
     if (!faculty) return res.status(404).json({ success: false, message: 'Faculty not found' });
+    if (faculty.role !== 'faculty' || faculty.isActive === false) return res.status(400).json({ success: false, message: 'Select an active faculty account' });
 
     // find credit title (from Dynamo)
     const ct = await CreditTitle.findById(creditTitleId);
-    if (!ct || ct.type !== 'negative')
+    if (!ct || ct.type !== 'negative' || ct.isActive === false)
       return res.status(400).json({ success: false, message: 'Invalid negative credit title' });
 
     const { proofUrl, proofMeta } = await handleFileUpload(req.file, academicYear);
 
-    const pointsValue = -Math.abs(Number(ct.points || 0));
+    const amount = Math.abs(Number(ct.points));
+    const maxPoints = Math.max(1, Number(process.env.MAX_ISSUED_CREDIT_POINTS) || 10000);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > maxPoints) return res.status(400).json({ success: false, message: 'Credit title points are invalid' });
+    const pointsValue = -amount;
 
     const c = await Credit.create({
       faculty: String(faculty._id),
@@ -338,6 +347,9 @@ async function getNegativeCredits(req, res, next) {
     // If faculty, strictly force their own ID. If Admin/OA, optionally allow filtering by a specific facultyId.
     if (actor.role === 'faculty') {
       filter.faculty = String(actor._id);
+    } else if (actor.role === 'oa') {
+      filter.issuedBy = String(actor._id);
+      if (queryId) filter.faculty = String(queryId);
     } else if (queryId) {
       filter.faculty = String(queryId);
     }
@@ -430,10 +442,19 @@ async function appealNegativeCredit(req, res, next) {
     // update the credit in Dynamo
     await Credit.update(creditId, {
       appeal: appealObj,
+      ...(credit.appeal ? { appealHistory: [...(credit.appealHistory || []), { ...credit.appeal, supersededAt: new Date().toISOString() }] } : {}),
       status: 'appealed',
       appealCount: (credit.appealCount || 0) + 1,
       updatedAt: new Date().toISOString(),
     });
+
+    let balanceUpdated = true;
+    try {
+      await recalcFacultyCredits(String(faculty._id));
+    } catch (error) {
+      balanceUpdated = false;
+      console.error('Appeal saved but faculty balance recalculation failed:', error);
+    }
 
     // fetch updated credit to return
     const updated = await Credit.findById(creditId);
@@ -464,7 +485,7 @@ async function appealNegativeCredit(req, res, next) {
       }
     }
 
-    return res.json({ success: true, message: 'Appeal submitted successfully', data: updated });
+    return res.json({ success: true, message: 'Appeal submitted successfully', balanceUpdated, data: updated });
   } catch (err) {
     console.error('appealNegativeCredit error:', err);
     next(err);
@@ -563,6 +584,7 @@ async function recalcCreditsController(req, res, next) {
  */
 async function getFacultyCredits(req, res, next) {
   try {
+    await ensureDb();
     const { facultyId } = req.params;
     const { recalc } = req.query;
     const period = (req.query.period || 'monthly').toLowerCase();
@@ -622,9 +644,9 @@ async function getFacultyCredits(req, res, next) {
     if (Credit.find) {
       credits = await Credit.find({ faculty: String(userId) });
     }
+    const officialMetrics = processCredits(credits);
 
     // ---------- quick helpers ----------
-    const EXCLUDE_STATUS = new Set(['pending', 'deleted']);
     const parseDateSafe = (s) => {
       if (!s) return null;
       const d = new Date(s);
@@ -735,23 +757,12 @@ async function getFacultyCredits(req, res, next) {
     const periodMap = Object.create(null);
     const yearsSeen = new Set();
 
-    function negativeShouldApply(credit) {
-      if (!credit.appeal) return String(credit.status) === 'approved';
-      const raw = credit.appeal.status;
-      const status = raw === undefined || raw === null ? '' : String(raw).trim().toLowerCase();
-      if (status === 'rejected') return true;
-      return false;
-    }
-
     for (let i = 0; i < credits.length; i++) {
       const c = credits[i];
       if (!c) continue;
 
-      // status filtering - skip pending/deleted (also skip if appeal.status is pending/deleted)
       const st = (c.status || '').toString().trim().toLowerCase();
-      if (EXCLUDE_STATUS.has(st)) continue;
-      const appealSt = c.appeal && c.appeal.status ? String(c.appeal.status).trim().toLowerCase() : '';
-      if (appealSt && EXCLUDE_STATUS.has(appealSt)) continue;
+      if (st === 'deleted') continue;
 
       // respect startDate/endDate filtering based on createdAt (or updatedAt if you prefer)
       const createdAt = c.createdAt ? new Date(c.createdAt) : null;
@@ -764,10 +775,10 @@ async function getFacultyCredits(req, res, next) {
       creditsCountByYear[year] = (creditsCountByYear[year] || 0) + 1;
 
       // points coercion
-      const pts = Number(c.points ?? 0) || 0;
+      const impact = creditImpact(c).points;
 
       // period key (for requested period) - for academicYear grouping we use c.academicYear
-      const periodKey = period === 'academicyear' || period === 'academicyear' ? (c.academicYear || year) : getPeriodKey(createdAt, period);
+      const periodKey = period === 'academicyear' ? (c.academicYear || year) : getPeriodKey(createdAt, period);
 
       if (!periodMap[periodKey]) {
         periodMap[periodKey] = {
@@ -780,22 +791,19 @@ async function getFacultyCredits(req, res, next) {
       }
 
       if (String(c.type) === 'positive') {
-        // only count positives that are approved (pending/deleted already excluded)
-        if (String(c.status).toLowerCase() === 'approved') {
+        if (impact > 0) {
           totalPositiveCount++;
-          totalPositivePoints += pts;
+          totalPositivePoints += impact;
           positiveCountByYear[year] = (positiveCountByYear[year] || 0) + 1;
-          positivePointsByYear[year] = (positivePointsByYear[year] || 0) + pts;
+          positivePointsByYear[year] = (positivePointsByYear[year] || 0) + impact;
 
-          periodMap[periodKey].positivePoints += pts;
+          periodMap[periodKey].positivePoints += impact;
           periodMap[periodKey].positiveCount += 1;
-          periodMap[periodKey].net += pts;
+          periodMap[periodKey].net += impact;
         }
-      } else if (String(c.type) === 'negative') {
+      } else if (String(c.type) === 'negative' && impact < 0) {
         totalNegativeCount++;
-        // accumulate negative points always as sum; whether it actually applies (deduction) is decided by negativeShouldApply for applied counts
-        // For "sum of negatives" user asked, we treat negative sum as absolute of points in negative credits (excluding pending/deleted)
-        const negPts = Math.abs(pts);
+        const negPts = -impact;
         totalNegativePoints += negPts;
         negativeCountByYear[year] = (negativeCountByYear[year] || 0) + 1;
         negativePointsByYear[year] = (negativePointsByYear[year] || 0) + negPts;
@@ -832,10 +840,10 @@ async function getFacultyCredits(req, res, next) {
     // current academic year logic (prefer constructed current year if present)
     const now = new Date();
     const y = now.getFullYear();
-    const constructedAcademicYear = `${y}-${y + 1}`;
-    let currentAcademicYear = constructedAcademicYear;
+    const constructedAcademicYear = `${y}-${String(y + 1).slice(-2)}`;
+    let currentAcademicYear = String(req.query.academicYear || '').trim() || constructedAcademicYear;
 
-    if (!yearsSeen.has(constructedAcademicYear)) {
+    if (!req.query.academicYear && !yearsSeen.has(constructedAcademicYear)) {
       const yearsArray = Array.from(yearsSeen).filter(Boolean).sort();
       if (yearsArray.length === 0) currentAcademicYear = null;
       else currentAcademicYear = yearsArray[yearsArray.length - 1];
@@ -878,8 +886,10 @@ async function getFacultyCredits(req, res, next) {
       data: {
         name: user.name,
         facultyID: user.facultyID,
-        currentCredit: user.currentCredit || 0,
-        creditsByYear: user.creditsByYear || {},
+        currentCredit: officialMetrics.runningTotal,
+        totalPositiveCredit: officialMetrics.totalPositive,
+        totalNegativeCredit: officialMetrics.totalNegative,
+        creditsByYear: officialMetrics.netByYear,
         stats,
       },
     });
@@ -935,8 +945,15 @@ async function deletePositiveCredit(req, res, next) {
     if (String(credit.faculty) !== String(faculty._id)) return res.status(403).json({ success: false, message: 'Unauthorized' });
     if (credit.status !== 'pending') return res.status(400).json({ success: false, message: 'Can only delete pending credits' });
 
-    await Credit.delete(creditId);
-    res.json({ success: true, message: 'Credit deleted' });
+    try {
+      await Credit.voidByActor(creditId, faculty._id, credit.updatedAt,
+        { reason: 'Faculty withdrew pending positive credit', before: { status: credit.status, points: credit.points }, after: { status: 'deleted', points: 0 } });
+    } catch (error) {
+      if (error.name === 'ConditionalCheckFailedException') return res.status(409).json({ success: false, message: 'Credit changed; reload and try again' });
+      throw error;
+    }
+    await recalcFacultyCredits(String(credit.faculty));
+    res.json({ success: true, message: 'Credit voided; record preserved' });
   } catch (err) { next(err); }
 }
 
@@ -974,7 +991,11 @@ async function updateAppeal(req, res, next) {
       if (newAppeal.proofMeta === undefined) delete newAppeal.proofMeta;
     }
 
-    await Credit.update(creditId, { appeal: newAppeal, updatedAt: new Date().toISOString() });
+    await Credit.update(creditId, {
+      appeal: { ...newAppeal, updatedAt: new Date().toISOString() },
+      appealHistory: [...(credit.appealHistory || []), { ...credit.appeal, supersededAt: new Date().toISOString(), action: 'edited' }],
+      updatedAt: new Date().toISOString(),
+    });
     const updated = await Credit.findById(creditId);
 
     io.emit(`faculty:${faculty._id}:creditUpdate`, updated);
@@ -999,7 +1020,7 @@ async function deleteAppeal(req, res, next) {
     if (credit.appeal.status !== 'pending') return res.status(400).json({ success: false, message: 'Cannot delete processed appeal' });
 
     await Credit.update(creditId, {
-      appeal: null,
+      appeal: { ...credit.appeal, status: 'withdrawn', withdrawnAt: new Date().toISOString() },
       status: 'pending', // Revert to pending
       updatedAt: new Date().toISOString()
     });
@@ -1020,9 +1041,11 @@ async function getSingleCredit(req, res, next) {
     if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
 
     // Access Control:
-    // 1. Admin/OA can see any credit
-    // 2. Faculty can only see their own credits
+    // Faculty see their own credits; OAs see only credits they issued.
     if (user.role === 'faculty' && String(credit.faculty) !== String(user._id)) {
+      return res.status(403).json({ success: false, message: 'Unauthorized access to this credit' });
+    }
+    if (user.role === 'oa' && String(credit.issuedBy) !== String(user._id)) {
       return res.status(403).json({ success: false, message: 'Unauthorized access to this credit' });
     }
 
@@ -1135,7 +1158,15 @@ async function deleteNegativeCredit(req, res, next) {
     if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
     if (credit.type !== 'negative') return res.status(400).json({ success: false, message: 'Not a negative credit' });
 
-    await Credit.delete(creditId);
+    if (credit.status === 'deleted') return res.status(409).json({ success: false, message: 'Credit is already voided' });
+    try {
+      await Credit.voidByActor(creditId, req.user._id, credit.updatedAt,
+        { reason: String(req.body?.reason || 'Voided by an administrator').trim().slice(0, 1000),
+          before: { status: credit.status, points: credit.points }, after: { status: 'deleted', points: 0 } });
+    } catch (error) {
+      if (error.name === 'ConditionalCheckFailedException') return res.status(409).json({ success: false, message: 'Credit changed; reload and try again' });
+      throw error;
+    }
 
     // Recalc
     try { await recalcFacultyCredits(credit.faculty); } catch (e) { }
@@ -1143,7 +1174,7 @@ async function deleteNegativeCredit(req, res, next) {
     // Notify FE about deletion (send ID or null)
     io.emit(`faculty:${credit.faculty}:creditDelete`, { creditId, type: 'negative' });
 
-    return res.json({ success: true, message: 'Negative credit deleted' });
+    return res.json({ success: true, message: 'Negative credit voided; record preserved' });
   } catch (err) {
     next(err);
   }

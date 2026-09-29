@@ -4,11 +4,6 @@ const formidable = require('express-formidable');
 const {
   getProfile,
   updateProfile,
-  adminCreateUser,
-  listUsers,
-  getUserById,
-  adminUpdateUser,
-  deleteUser,
   changePassword,
   getMfaSetup,
   enableMfa,
@@ -16,7 +11,8 @@ const {
   getSessions,
   exportUserData
 } = require('../Controllers/userController');
-const { authMiddleware, requirePermission } = require('../Middleware/authMiddleware');
+const { createUser, listUsers, getUser, updateUser, deactivateUser, resetUserPassword } = require('../Controllers/Admin/UserManagementController');
+const { authMiddleware, requirePermission, requireAnyPermission } = require('../Middleware/authMiddleware');
 const {
   getOwnProfessionalProfile, getFacultyProfessionalProfile,
   updateOwnProfessionalProfile, updateFacultyEmployment,
@@ -50,12 +46,13 @@ router.patch('/me/professional-profile', authMiddleware, requirePermission('prof
 /**
  * Admin routes
  */
-router.post('/', authMiddleware, requirePermission('user.create'), parseForm, adminCreateUser);
-router.get('/', authMiddleware, requirePermission('user.read'), listUsers);
+router.post('/', authMiddleware, requirePermission('user.create'), parseForm, createUser);
+router.get('/', authMiddleware, requireAnyPermission('user.read', 'user.read:faculty'), listUsers);
 router.get('/:id/professional-profile', authMiddleware, requirePermission('profile.read:any'), getFacultyProfessionalProfile);
 router.put('/:id/employment', authMiddleware, requirePermission('profile.update:any'), updateFacultyEmployment);
-router.get('/:id', authMiddleware, requirePermission('user.read'), getUserById);
-router.put('/:id', authMiddleware, requirePermission('user.update'), parseForm, adminUpdateUser);
-router.delete('/:id', authMiddleware, requirePermission('user.deactivate'), deleteUser);
+router.get('/:id', authMiddleware, requireAnyPermission('user.read', 'user.read:faculty'), getUser);
+router.put('/:id', authMiddleware, requirePermission('user.update'), parseForm, updateUser);
+router.post('/:id/reset-password', authMiddleware, requirePermission('user.update'), resetUserPassword);
+router.delete('/:id', authMiddleware, requirePermission('user.deactivate'), deactivateUser);
 
 module.exports = router;

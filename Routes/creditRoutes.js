@@ -21,7 +21,7 @@ const {
   deleteNegativeCredit
 } = require('../Controllers/creditController');
 
-const { authMiddleware, requirePermission, requireSelfOrPermission } = require('../Middleware/authMiddleware');
+const { authMiddleware, adminOnly, requirePermission, requireSelfOrPermission } = require('../Middleware/authMiddleware');
 const { ensureWhatsappVerified } = require('../Middleware/whatsappMiddleware');
 const apiKeyMiddleware = require('../Middleware/apiKeyMiddleware');
 
@@ -55,8 +55,8 @@ router.get('/credits/faculty/:facultyId', authMiddleware, requireSelfOrPermissio
 router.post('/credit-title', authMiddleware, requirePermission('credit.title.manage'), createCreditTitle);
 router.get('/credit-title', authMiddleware, requirePermission('credit.title.read'), listCreditTitles);
 router.post('/credits/negative', authMiddleware, requirePermission('credit.issue'), upload.single('proof'), adminIssueNegativeCredit);
-router.put('/credits/negative/:creditId', authMiddleware, requirePermission('credit.issue'), upload.single('proof'), updateNegativeCredit);
-router.delete('/credits/negative/:creditId', authMiddleware, requirePermission('credit.issue'), deleteNegativeCredit);
+router.put('/credits/negative/:creditId', authMiddleware, adminOnly, upload.single('proof'), updateNegativeCredit);
+router.delete('/credits/negative/:creditId', authMiddleware, adminOnly, deleteNegativeCredit);
 
 // Faculty: get all negative credits (with filters)
 router.get('/credits/negative', authMiddleware, getNegativeCredits);

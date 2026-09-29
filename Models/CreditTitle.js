@@ -1,7 +1,7 @@
 // models/CreditTitle.js
 const { newObjectId } = require('../utils/objectId');
 const { getDynamoClient } = require('../config/db');
-const { PutCommand, GetCommand, ScanCommand, UpdateCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb');
+const { PutCommand, GetCommand, ScanCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
 require('dotenv').config();
 const TABLE = process.env.DYNAMO_DB_TITLES;
 
@@ -76,8 +76,6 @@ module.exports = {
   },
 
   async delete(id) {
-    const client = getDynamoClient();
-    await client.send(new DeleteCommand({ TableName: TABLE, Key: { _id: id } }));
-    return { deleted: true };
+    return this.update(id, { isActive: false, updatedAt: new Date().toISOString() });
   },
 };

@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const path = require('path');
 const Credit = require('../Models/Credit');
 const User = require('../Models/User');
+const { creditImpact } = require('../domain/creditAccounting');
 const { createExportVerification, addExcelVerificationSheet, addPdfVerification } = require('../utils/exportVerification');
 
 function parseDateRange(startDate, endDate) {
@@ -23,15 +24,7 @@ function parseDateRange(startDate, endDate) {
 }
 
 function effectivePoints(credit) {
-  const points = Math.abs(Number(credit.points) || 0);
-  const status = String(credit.status || '').toLowerCase();
-  const appealStatus = String(credit.appeal?.status || '').toLowerCase();
-  if (credit.type === 'positive') return status === 'approved' ? points : 0;
-  if (credit.type === 'negative') {
-    const applies = appealStatus ? appealStatus === 'rejected' : status === 'approved';
-    return applies ? -points : 0;
-  }
-  return 0;
+  return creditImpact(credit).points;
 }
 
 function publicFaculty(user) {
@@ -51,6 +44,8 @@ function publicFaculty(user) {
     isActive: user.isActive !== false,
     joinedAt: user.createdAt || '',
     currentCredit: Number(user.currentCredit) || 0,
+    totalPositiveCredit: Number(user.totalPositiveCredit) || 0,
+    totalNegativeCredit: Number(user.totalNegativeCredit) || 0,
     creditsByYear: user.creditsByYear || {},
   };
 }
@@ -87,16 +82,36 @@ async function loadLedger(facultyId, query) {
     if (credit.type === 'positive') {
       result.positiveRecords += 1;
       result.positivePoints += magnitude;
+      result.effectivePositivePoints += Math.max(0, effective);
     } else if (credit.type === 'negative') {
       result.negativeRecords += 1;
       result.negativePoints += magnitude;
+      result.effectiveNegativePoints += Math.max(0, -effective);
     }
     result.effectiveNet += effective;
     result.statusCounts[credit.status || 'unknown'] = (result.statusCounts[credit.status || 'unknown'] || 0) + 1;
     return result;
-  }, { totalRecords: credits.length, positiveRecords: 0, negativeRecords: 0, positivePoints: 0, negativePoints: 0, effectiveNet: 0, statusCounts: {} });
+  }, { totalRecords: credits.length, positiveRecords: 0, negativeRecords: 0, positivePoints: 0, negativePoints: 0, effectivePositivePoints: 0, effectiveNegativePoints: 0, effectiveNet: 0, statusCounts: {} });
 
-  return { faculty: publicFaculty(faculty), summary, credits, filters: { type, status, startDate: query.startDate || null, endDate: query.endDate || null } };
+  const actorIds = [...new Set(credits.flatMap(credit => [credit.issuedBy, credit.appeal?.reviewedBy]).filter(Boolean).map(String))];
+  const actors = await Promise.all(actorIds.map(async id => {
+    try {
+      const actor = await User.findById(id);
+      return [id, actor ? `${actor.prefix || ''} ${actor.name || ''}`.trim() || actor.facultyID || id : id];
+    } catch { return [id, id]; }
+  }));
+  const actorNames = new Map(actors);
+  const detailedCredits = credits.map(credit => ({
+    ...credit,
+    effectivePoints: effectivePoints(credit),
+    issuedByName: credit.issuedBy ? actorNames.get(String(credit.issuedBy)) || String(credit.issuedBy) : '',
+    appeal: credit.appeal ? {
+      ...credit.appeal,
+      reviewedByName: credit.appeal.reviewedBy ? actorNames.get(String(credit.appeal.reviewedBy)) || String(credit.appeal.reviewedBy) : '',
+    } : null,
+  }));
+
+  return { faculty: publicFaculty(faculty), summary, credits: detailedCredits, filters: { type, status, startDate: query.startDate || null, endDate: query.endDate || null } };
 }
 
 async function getFacultyLedger(req, res, next) {
@@ -110,13 +125,16 @@ async function getFacultyLedger(req, res, next) {
 
 function validateRankingQuery(query) {
   const type = String(query.type || 'all').toLowerCase();
-  const sort = 'desc';
+  const sort = String(query.sort || 'desc').toLowerCase();
   const groupBy = String(query.groupBy || 'institution').toLowerCase();
   if (!['all', 'positive', 'negative'].includes(type)) {
     const error = new Error('type must be all, positive, or negative'); error.status = 400; throw error;
   }
   if (!['institution', 'college', 'department'].includes(groupBy)) {
     const error = new Error('groupBy must be institution, college, or department'); error.status = 400; throw error;
+  }
+  if (!['asc', 'desc'].includes(sort)) {
+    const error = new Error('sort must be asc or desc'); error.status = 400; throw error;
   }
   return { type, sort, groupBy, ...parseDateRange(query.startDate, query.endDate) };
 }
@@ -139,25 +157,53 @@ async function loadFacultyRanking(query) {
   });
   const totals = new Map(faculty.map(user => [String(user._id), {
     faculty: publicFaculty(user), positivePoints: 0, negativePoints: 0, netCredits: 0, records: 0,
+    statusCounts: {}, appealStatusCounts: {},
   }]));
   credits.forEach(credit => {
     const row = totals.get(String(credit.faculty));
     if (!row) return;
-    const magnitude = Math.abs(Number(credit.points) || 0);
     row.records += 1;
-    if (credit.type === 'positive') row.positivePoints += magnitude;
-    if (credit.type === 'negative') row.negativePoints += magnitude;
-    row.netCredits += effectivePoints(credit);
+    const status = String(credit.status || 'unknown').toLowerCase();
+    row.statusCounts[status] = (row.statusCounts[status] || 0) + 1;
+    if (credit.appeal?.status) {
+      const appealStatus = String(credit.appeal.status).toLowerCase();
+      row.appealStatusCounts[appealStatus] = (row.appealStatusCounts[appealStatus] || 0) + 1;
+    }
+    const effective = effectivePoints(credit);
+    if (effective > 0) row.positivePoints += effective;
+    if (effective < 0) row.negativePoints += -effective;
+    row.netCredits += effective;
   });
   const rankingPoints = row => type === 'positive'
     ? row.positivePoints
     : type === 'negative'
       ? row.negativePoints
-      : row.positivePoints + row.negativePoints;
+      : row.netCredits;
+  const hasEffectiveScore = row => type === 'positive'
+    ? row.positivePoints > 0
+    : type === 'negative'
+      ? row.negativePoints > 0
+      : row.positivePoints > 0 || row.negativePoints > 0;
+  const rankingGroup = row => groupBy === 'institution'
+    ? 'Institution'
+    : groupBy === 'college'
+      ? row.faculty.college || 'College not recorded'
+      : `${row.faculty.college || 'College not recorded'} / ${row.faculty.department || 'Department not recorded'}`;
+  const groupRanks = new Map();
   const rows = [...totals.values()].sort((a, b) => {
-    const difference = rankingPoints(b) - rankingPoints(a);
-    return difference || a.faculty.name.localeCompare(b.faculty.name);
-  }).map((row, index) => ({ rank: index + 1, rankingPoints: rankingPoints(row), ...row }));
+    const groupDifference = groupBy === 'institution' ? 0 : rankingGroup(a).localeCompare(rankingGroup(b));
+    if (groupDifference) return groupDifference;
+    if (hasEffectiveScore(a) !== hasEffectiveScore(b)) return hasEffectiveScore(a) ? -1 : 1;
+    const scoreDifference = sort === 'asc'
+      ? rankingPoints(a) - rankingPoints(b)
+      : rankingPoints(b) - rankingPoints(a);
+    return scoreDifference || a.faculty.name.localeCompare(b.faculty.name);
+  }).map(row => {
+    const group = rankingGroup(row);
+    const rank = hasEffectiveScore(row) ? (groupRanks.get(group) || 0) + 1 : null;
+    if (rank !== null) groupRanks.set(group, rank);
+    return { rank, rankingGroup: group, rankingPoints: rankingPoints(row), ...row };
+  });
   const options = await User.find({ role: 'faculty' });
   return {
     rows,
@@ -186,6 +232,12 @@ async function exportFacultyRanking(req, res, next) {
     if (!['pdf', 'excel'].includes(format)) return res.status(400).json({ success: false, message: 'format must be pdf or excel' });
     const report = await loadFacultyRanking(req.query);
     const title = 'Faculty Credit Ranking Ledger';
+    const scoreLabel = report.filters.type === 'positive' ? 'Approved Positive' : report.filters.type === 'negative' ? 'Deducted Points' : 'Net Score';
+    const scoreRule = report.filters.type === 'positive'
+      ? 'Approved positive credits only'
+      : report.filters.type === 'negative'
+        ? 'Active negative deductions; accepted appeals count as zero'
+        : 'Approved positive credits minus active negative deductions';
     const generatedBy = req.user?.name || 'Administrator';
     const verification = await createExportVerification({
       documentType: 'faculty_credit_ranking_ledger',
@@ -209,10 +261,10 @@ async function exportFacultyRanking(req, res, next) {
       const sheet = workbook.addWorksheet('Faculty Ranking');
       sheet.addRow([title]);
       sheet.addRow(['Scope', report.filters.groupBy, 'College', report.filters.college || 'All', 'Department', report.filters.department || 'All']);
-      sheet.addRow(['Credit type', report.filters.type, 'Date range', report.filters.startDate || 'Beginning', report.filters.endDate || 'Present']);
-      sheet.addRow([]);
-      sheet.addRow(['Rank', 'Faculty ID', 'Faculty Name', 'College', 'Department', 'Positive Credits', 'Negative Credits', 'Ranking Credits', 'Records']);
-      report.rows.forEach(row => sheet.addRow([row.rank, row.faculty.facultyID, `${row.faculty.prefix} ${row.faculty.name}`.trim(), row.faculty.college, row.faculty.department, row.positivePoints, row.negativePoints, row.rankingPoints, row.records]));
+      sheet.addRow(['Credit type', report.filters.type, 'Date range', report.filters.startDate || 'Beginning', report.filters.endDate || 'Present', 'Order', report.filters.sort === 'asc' ? 'Low to high' : 'High to low']);
+      sheet.addRow(['Score calculation', scoreRule]);
+      sheet.addRow(['Rank', 'Faculty ID', 'Faculty Name', 'College', 'Department', 'Positive Credits', 'Negative Credits', scoreLabel, 'Records']);
+      report.rows.forEach(row => sheet.addRow([row.rank ?? 'Unranked', row.faculty.facultyID, `${row.faculty.prefix} ${row.faculty.name}`.trim(), row.faculty.college, row.faculty.department, row.positivePoints, row.negativePoints, row.rankingPoints, row.records]));
       sheet.columns = [8, 18, 30, 30, 25, 18, 18, 15, 12].map(width => ({ width }));
       sheet.getRow(5).font = { bold: true, color: { argb: 'FFFFFFFF' } };
       sheet.getRow(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF001B70' } };
@@ -224,13 +276,14 @@ async function exportFacultyRanking(req, res, next) {
         const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 36 }); const chunks = [];
         doc.on('data', chunk => chunks.push(chunk)); doc.on('end', () => resolve(Buffer.concat(chunks))); doc.on('error', reject);
         doc.font('Helvetica-Bold').fontSize(18).fillColor('#001B70').text(title);
-        doc.font('Helvetica').fontSize(8).fillColor('#667085').text(`Scope: ${report.filters.groupBy} | College: ${report.filters.college || 'All'} | Department: ${report.filters.department || 'All'} | Credits: ${report.filters.type} | ${report.filters.startDate || 'Beginning'} to ${report.filters.endDate || 'Present'}`);
+        doc.font('Helvetica').fontSize(8).fillColor('#667085').text(`Scope: ${report.filters.groupBy} | College: ${report.filters.college || 'All'} | Department: ${report.filters.department || 'All'} | Credits: ${report.filters.type} | Order: ${report.filters.sort === 'asc' ? 'Low to high' : 'High to low'} | ${report.filters.startDate || 'Beginning'} to ${report.filters.endDate || 'Present'}`);
+        doc.text(`Score calculation: ${scoreRule}`);
         doc.moveDown();
         const widths = [35, 75, 155, 120, 105, 65, 65, 60];
-        const headers = ['Rank', 'Faculty ID', 'Faculty name', 'College', 'Department', 'Positive', 'Negative', 'Ranking'];
+        const headers = ['Rank', 'Faculty ID', 'Faculty name', 'College', 'Department', 'Positive', 'Negative', scoreLabel];
         const drawRow = (values, header = false) => { const y = doc.y; let x = 36; if (header) doc.rect(36, y - 3, 680, 18).fill('#001B70'); values.forEach((value, i) => { doc.font(header ? 'Helvetica-Bold' : 'Helvetica').fontSize(7).fillColor(header ? '#FFFFFF' : '#172033').text(String(value ?? ''), x + 3, y, { width: widths[i] - 6, ellipsis: true }); x += widths[i]; }); doc.y = y + 19; };
         drawRow(headers, true);
-        report.rows.forEach(row => { if (doc.y > 540) { doc.addPage(); drawRow(headers, true); } drawRow([row.rank, row.faculty.facultyID, `${row.faculty.prefix} ${row.faculty.name}`.trim(), row.faculty.college, row.faculty.department, row.positivePoints, row.negativePoints, row.rankingPoints]); });
+        report.rows.forEach(row => { if (doc.y > 540) { doc.addPage(); drawRow(headers, true); } drawRow([row.rank ?? 'Unranked', row.faculty.facultyID, `${row.faculty.prefix} ${row.faculty.name}`.trim(), row.faculty.college, row.faculty.department, row.positivePoints, row.negativePoints, row.rankingPoints]); });
         if (!report.rows.length) doc.text('No faculty records matched the selected filters.');
         addPdfVerification(doc, verification);
         doc.end();

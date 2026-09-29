@@ -6,7 +6,6 @@ const {
   GetCommand,
   ScanCommand,
   UpdateCommand,
-  DeleteCommand,
 } = require('@aws-sdk/lib-dynamodb');
 
 const TABLE = process.env.DYNAMO_DB_USERS;
@@ -131,10 +130,6 @@ module.exports = {
    * Delete user by ID
    */
   async delete(id) {
-    const client = getDynamoClient();
-    await client.send(
-      new DeleteCommand({ TableName: TABLE, Key: { _id: id } })
-    );
-    return { deleted: true };
+    throw new Error(`Physical deletion of user ${id} is disabled; deactivate the account instead`);
   },
 };

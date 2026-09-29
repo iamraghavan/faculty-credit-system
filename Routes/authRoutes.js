@@ -19,7 +19,7 @@ const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 // existing
-router.post('/register', authMiddleware, register);
+router.post('/register', authMiddleware, adminOnly, register);
 router.post('/login', login);
 router.get('/refresh', authMiddleware, refreshToken);
 

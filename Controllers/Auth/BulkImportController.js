@@ -32,28 +32,39 @@ async function bulkRegister(req, res, next) {
     // 2. Process rows (Hashing is slow, so we do it in parallel or chunks if needed, but sequential is safer for CPU)
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-      const email = (row.email || row.Email || '').trim().toLowerCase();
+      const email = String(row.email || row.Email || '').trim().toLowerCase();
+      const name = String(row.name || row.Name || '').trim();
+      const college = String(row.college || row.College || '').trim();
+      const department = String(row.department || row.Department || '').trim();
+      const password = String(row.password || row.Password || '');
       
-      if (!email || existingEmails.has(email)) {
-        results.push({ row: i+2, success: false, message: 'Duplicate or missing email' });
+      if (!/^\S+@\S+\.\S+$/.test(email) || existingEmails.has(email)) {
+        results.push({ row: i+2, success: false, message: 'Duplicate or invalid email' });
         continue;
       }
-
-      // ... other validation ...
-
-      const password = row.password || 'Default@123';
-      const hashed = await bcrypt.hash(String(password), 10);
+      if (!name || !college || !department || password.length < 12 || password.length > 128) {
+        results.push({ row: i+2, success: false, message: 'Name, college, department and a 12 to 128 character password are required' });
+        continue;
+      }
+      const hashed = await bcrypt.hash(password, 12);
 
       const newUser = {
-        name: row.name || 'Unknown',
+        name,
         email,
         password: hashed,
-        college: row.college || 'Default',
-        role: 'faculty', // Simplified for brevity
-        facultyID: generateFacultyID(row.college || 'DEF'),
+        college,
+        department,
+        role: 'faculty',
+        facultyID: generateFacultyID(college),
         apiKey: generateApiKey(),
         isActive: true,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        createdBy: String(req.user._id),
+        currentCredit: 0,
+        totalPositiveCredit: 0,
+        totalNegativeCredit: 0,
+        creditsByYear: {},
       };
 
       // 3. Create User

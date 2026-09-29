@@ -31,7 +31,7 @@ const connectDB = async () => {
     },
   });
 
-  console.log(`✅ Connected to DynamoDB (${process.env.AWS_REGION})`);
+  console.log(`DynamoDB client configured (${process.env.AWS_REGION}); credentials are checked on the first request`);
   return dynamoDocClient;
 };
 
