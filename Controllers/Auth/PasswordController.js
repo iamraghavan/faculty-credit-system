@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const fs = require('fs');
 const path = require('path');
 const User = require('../../Models/User');
+const Session = require('../../Models/Session');
 const { sendEmail } = require('../../utils/email');
 
 /**
@@ -95,8 +96,13 @@ async function resetPassword(req, res, next) {
       password: hashedPassword,
       resetPasswordToken: null,
       resetPasswordExpires: null,
+      passwordChangedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     });
+
+    // A reset means the old password may be known to someone else:
+    // sign out every device (SEC-10).
+    await Session.revokeAllForUser(user._id);
 
     // Send Confirmation Email
     const templatePath = path.join(process.cwd(), 'email-templates', 'reset-success.html');

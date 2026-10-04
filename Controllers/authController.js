@@ -272,12 +272,29 @@ async function login(req, res, next) {
 async function refreshToken(req, res, next) {
   try {
     if (!req.user) return res.status(401).json({ success: false, message: 'Unauthorized' });
+    // The new token stays bound to the same server-side session, so revoking
+    // the session (logout, password change) also revokes refreshed tokens (SEC-09).
+    const sessionId = req.auth?.sessionId;
+    if (!sessionId) return res.status(401).json({ success: false, message: 'Please sign in again' });
     const token = jwt.sign(
-      { id: req.user._id, role: req.user.role },
+      { id: req.user._id, role: req.user.role, sessionId },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
     );
-    res.json({ success: true, token });
+    res.json({ success: true, token, sessionId });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/v1/auth/logout - ends the current session on the server (SEC-10).
+ */
+async function logout(req, res, next) {
+  try {
+    const sessionId = req.auth?.sessionId;
+    if (sessionId) await Session.revoke(sessionId);
+    res.json({ success: true, message: 'Signed out' });
   } catch (err) {
     next(err);
   }
@@ -983,10 +1000,14 @@ async function changePassword(req, res, next) {
     // Update in DynamoDB
     await User.update(user._id, {
       password: hashedPassword,
+      passwordChangedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
 
-    res.json({ success: true, message: 'Password changed successfully.' });
+    // Sign out every other device (an attacker's session must not survive) - SEC-10.
+    await Session.revokeAllForUser(user._id, req.auth?.sessionId);
+
+    res.json({ success: true, message: 'Password changed successfully. Other devices have been signed out.' });
   } catch (err) {
     console.error('Change password error:', err);
     next(err);
@@ -1143,6 +1164,7 @@ module.exports = {
   getProfile,
   changePassword,
   refreshToken,
+  logout,
   // bulkRegister, // Defined in AuthenticationController? If not imported here, remove. 
   // Actually, let's keep the exports that are actually defined in THIS file.
   // register/login ARE defined in this file (lines 21, 76 approx).

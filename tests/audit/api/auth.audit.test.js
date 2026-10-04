@@ -245,7 +245,7 @@ describe('token validation (authMiddleware)', () => {
 });
 
 describe('sessions, refresh, logout', () => {
-  test.failing('[BUG] /auth/refresh returns a token WITHOUT a session id (survives session revocation)', async () => {
+  test('[FIXED SEC-09] a refreshed token is revoked together with its session', async () => {
     const t = await tokenFor(ID.faculty1, 'faculty');
     const res = await api().get('/api/v1/auth/refresh').set(auth(t));
     expect(res.status).toBe(200);
@@ -255,10 +255,24 @@ describe('sessions, refresh, logout', () => {
     expect((await api().get('/api/v1/auth/profile').set(auth(fresh))).status).toBe(401);
   });
 
-  test.failing('[BUG] there is no logout endpoint', async () => {
+  test('[FIXED SEC-10] logout ends the session on the server (token stops working)', async () => {
     const t = await tokenFor(ID.faculty1, 'faculty');
+    expect((await api().get('/api/v1/auth/profile').set(auth(t))).status).toBe(200);
     const res = await api().post('/api/v1/auth/logout').set(auth(t));
     expect(res.status).toBe(200);
+    expect((await api().get('/api/v1/auth/profile').set(auth(t))).status).toBe(401);
+  });
+
+  test('a token without a session cannot be refreshed', async () => {
+    const t = await tokenFor(ID.faculty1, 'faculty', { withSession: false });
+    expect((await api().get('/api/v1/auth/refresh').set(auth(t))).status).toBe(401);
+  });
+
+  test('change password keeps the current session working', async () => {
+    const t = await tokenFor(ID.oa2, 'oa');
+    await api().post('/api/v1/auth/change-password').set(auth(t))
+      .send({ currentPassword: PASSWORD, newPassword: PASSWORD, confirmPassword: PASSWORD });
+    expect((await api().get('/api/v1/auth/profile').set(auth(t))).status).toBe(200);
   });
 
   test('session list returns only own sessions', async () => {
@@ -274,7 +288,7 @@ describe('sessions, refresh, logout', () => {
     expect((await api().delete(`/api/v1/auth/sessions/${otherSid}`).set(auth(t))).status).toBe(404);
   });
 
-  test.failing('[BUG] "log out all other devices" does nothing (route shadowed by /sessions/:id)', async () => {
+  test('[FIXED B-38a] "log out all other devices" works', async () => {
     const other = await tokenFor(ID.oa2, 'oa');
     const current = await tokenFor(ID.oa2, 'oa');
     const res = await api().delete('/api/v1/auth/sessions/others').set(auth(current));
@@ -307,7 +321,7 @@ describe('password change and reset', () => {
     expect(accepted).toBe(false);
   });
 
-  test.failing('[BUG] change password does not end other sessions', async () => {
+  test('[FIXED SEC-10] change password ends other sessions', async () => {
     const other = await tokenFor(ID.oa2, 'oa');
     const t = await tokenFor(ID.oa2, 'oa');
     await api().post('/api/v1/auth/change-password').set(auth(t))
@@ -353,7 +367,7 @@ describe('password change and reset', () => {
     expect(accepted).toBe(false);
   });
 
-  test.failing('[BUG] reset password does not end existing sessions (attacker stays logged in)', async () => {
+  test('[FIXED SEC-10] reset password ends existing sessions', async () => {
     const attacker = await tokenFor(ID.faculty2, 'faculty');
     const token = await requestResetToken('faculty2@example.org');
     await api().post(`/api/v1/auth/reset-password/${token}`).send({ password: PASSWORD });

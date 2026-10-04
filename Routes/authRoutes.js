@@ -2,8 +2,8 @@
 const express = require('express');
 const router = express.Router();
 const {
-  refreshToken,
-  verifyMfa, getProfile, changePassword,
+  refreshToken, logout,
+  getProfile, changePassword,
   toggleEmailMfa, disableAllMfa,
   listSessions, revokeSession, revokeAllOtherSessions,
   sendWhatsappOtp, verifyWhatsappOtp
@@ -22,6 +22,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 router.post('/register', authMiddleware, adminOnly, register);
 router.post('/login', login);
 router.get('/refresh', authMiddleware, refreshToken);
+router.post('/logout', authMiddleware, logout);
 
 // NEW: bulk upload
 router.post('/users/bulk-upload', authMiddleware, adminOnly, upload.single('file'), bulkRegister);
@@ -41,8 +42,9 @@ router.get('/profile', authMiddleware, getProfile);
 
 // Session Management
 router.get('/sessions', authMiddleware, listSessions);
-router.delete('/sessions/:id', authMiddleware, revokeSession);
+// '/sessions/others' must come before '/sessions/:id', or 'others' is treated as an id.
 router.delete('/sessions/others', authMiddleware, revokeAllOtherSessions);
+router.delete('/sessions/:id', authMiddleware, revokeSession);
 // WhatsApp Verification
 router.post('/whatsapp/send-otp', authMiddleware, sendWhatsappOtp);
 router.post('/whatsapp/verify-otp', authMiddleware, verifyWhatsappOtp);

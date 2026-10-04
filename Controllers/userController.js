@@ -290,9 +290,12 @@ async function changePassword(req, res, next) {
     const salt = await bcrypt.genSalt(10);
     const hashed = await bcrypt.hash(newPassword, salt);
 
-    await User.update(userId, { password: hashed });
+    await User.update(userId, { password: hashed, passwordChangedAt: new Date().toISOString() });
 
-    res.json({ success: true, message: 'Password updated successfully' });
+    // Sign out every other device (SEC-10).
+    await require('../Models/Session').revokeAllForUser(userId, req.auth?.sessionId);
+
+    res.json({ success: true, message: 'Password updated successfully. Other devices have been signed out.' });
   } catch (err) {
     next(err);
   }

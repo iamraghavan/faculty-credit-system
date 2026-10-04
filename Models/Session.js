@@ -107,6 +107,17 @@ module.exports = {
     },
 
     /**
+     * Revoke every active session of a user, optionally keeping one
+     * (e.g. the session that just changed the password).
+     */
+    async revokeAllForUser(userId, exceptSessionId = null) {
+        const sessions = await this.findByUserId(String(userId));
+        const toRevoke = sessions.filter((s) => String(s._id) !== String(exceptSessionId || ''));
+        await Promise.all(toRevoke.map((s) => this.revoke(s._id)));
+        return { revokedCount: toRevoke.length };
+    },
+
+    /**
      * Delete all sessions for a user
      */
     async deleteByUserId(userId) {
