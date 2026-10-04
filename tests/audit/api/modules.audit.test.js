@@ -144,15 +144,37 @@ describe('reports and exports', () => {
     expect(res.status).toBe(200);
   });
 
-  test.failing('[BUG][CRITICAL] report "share link" puts the admin login token inside a PUBLIC short link', async () => {
+  test('[FIXED SEC-04] report "share link" no longer contains the admin login token', async () => {
     const res = await api().get('/api/v1/reports/download?format=pdf&share=true').set(auth(T.admin));
     const id = res.body.shareLink.split('/s/')[1];
-    // Step 2: anyone, without logging in, opens the short link and reads the redirect target.
     const open = await api().get(`/s/${id}`);
-    const leaked = new URL(open.headers.location).searchParams.get('token');
-    // Step 3: the leaked token works as the admin.
-    const asAdmin = leaked ? await api().get('/api/v1/users').set(auth(leaked)) : { status: 401 };
-    expect(asAdmin.status).toBe(401);
+    const target = open.headers.location;
+    expect(target).not.toContain(T.admin);
+    expect(new URL(target).searchParams.get('token')).toBeNull();
+    // Whatever is in the link, it must not work as a login.
+    const pass = decodeURIComponent(new URL(target).pathname.split('/shared/')[1] || '');
+    expect((await api().get('/api/v1/users').set(auth(pass))).status).toBe(401);
+  });
+
+  test('a shared report opens read-only without login (HTML, PDF, Excel)', async () => {
+    const res = await api().get('/api/v1/reports/download?format=pdf&share=true&view=ranking').set(auth(T.admin));
+    expect(res.body.expiresInHours).toBeGreaterThan(0);
+    const target = new URL((await api().get(`/s/${res.body.shareLink.split('/s/')[1]}`)).headers.location);
+    const path = target.pathname;
+    const html = await api().get(`${path}?format=html`);
+    expect(html.status).toBe(200);
+    expect(html.headers['content-type']).toMatch(/html/);
+    expect(html.text).not.toContain(T.admin);
+    for (const format of ['pdf', 'excel']) expect((await api().get(`${path}?format=${format}`)).status).toBe(200);
+  });
+
+  test('tampered or expired report links are refused', async () => {
+    expect((await api().get('/api/v1/reports/shared/not-a-pass?format=html')).status).toBe(401);
+    const jwt = require('jsonwebtoken');
+    const expired = jwt.sign({ purpose: 'report-share', q: {} }, process.env.EXPORT_SIGNING_SECRET, { expiresIn: -10 });
+    expect((await api().get(`/api/v1/reports/shared/${expired}?format=html`)).status).toBe(401);
+    // A login token is not a report pass.
+    expect((await api().get(`/api/v1/reports/shared/${T.admin}?format=html`)).status).toBe(401);
   });
 
   test('official Excel: signed, and the signature verifies publicly', async () => {

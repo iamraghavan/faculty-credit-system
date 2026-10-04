@@ -206,7 +206,7 @@ describe('token validation (authMiddleware)', () => {
     const t = await tokenFor(ID.faculty1, 'faculty', { withSession: false });
     expect((await api().get(PROFILE).set(auth(t))).status).toBe(401);
   });
-  test.failing('[BUG] token accepted in the URL query string (?token=), leaks via logs/history', async () => {
+  test('[FIXED SEC-21] login token is no longer accepted in the URL query string', async () => {
     const t = await tokenFor(ID.faculty1, 'faculty');
     expect((await api().get(`${PROFILE}?token=${t}`)).status).toBe(401);
   });

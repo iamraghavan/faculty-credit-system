@@ -4,7 +4,10 @@ const Session = require('../Models/Session');
 const { hasPermission, permissionsFor } = require('../config/permissions');
 
 async function authMiddleware(req, res, next) {
-  const token = req.headers.authorization?.split(' ')[1] || req.query.token;
+  // Tokens are accepted only in the Authorization header, never in the URL (SEC-21):
+  // URLs end up in browser history, server logs and Referer headers.
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : null;
   if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   try {

@@ -1,3 +1,4 @@
+const jwt = require('jsonwebtoken');
 const Credit = require('../Models/Credit');
 const User = require('../Models/User');
 const { createExcelReport, createPdfReport, createHtmlReport } = require('../utils/reportUtils');
@@ -91,16 +92,97 @@ async function getReportData(req, res, next) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Report share passes (SEC-04).
+// A share link used to contain the admin's own login token. It now carries a
+// separate signed pass that only opens the one report (with the filters that
+// were chosen), is read-only, expires, and is signed with EXPORT_SIGNING_SECRET
+// (never the login secret), so it can never be used to log in.
+// ---------------------------------------------------------------------------
+const SHARE_PURPOSE = 'report-share';
+const REPORT_QUERY_KEYS = ['level', 'id', 'academicYear', 'startDate', 'endDate', 'type', 'status', 'view', 'sortBy', 'order'];
+
+function shareSecret() {
+  const secret = process.env.EXPORT_SIGNING_SECRET;
+  if (!secret || Buffer.byteLength(secret) < 32) {
+    const error = new Error('Report sharing is not configured (EXPORT_SIGNING_SECRET must contain at least 32 bytes).');
+    error.status = 503;
+    throw error;
+  }
+  return secret;
+}
+
+function pickReportQuery(query) {
+  return Object.fromEntries(REPORT_QUERY_KEYS.filter((k) => query[k] !== undefined && query[k] !== '').map((k) => [k, String(query[k])]));
+}
+
+function createSharePass(query, user, hours) {
+  return jwt.sign(
+    { purpose: SHARE_PURPOSE, q: pickReportQuery(query), by: String(user?._id || '') },
+    shareSecret(),
+    { expiresIn: `${hours}h`, algorithm: 'HS256' },
+  );
+}
+
+function readSharePass(pass) {
+  const payload = jwt.verify(String(pass || ''), shareSecret(), { algorithms: ['HS256'] });
+  if (payload.purpose !== SHARE_PURPOSE || !payload.q) throw new Error('Not a report share pass');
+  return payload;
+}
+
+function sharedReportUrl(req, pass, format) {
+  return `${req.protocol}://${req.get('host')}/api/v1/reports/shared/${encodeURIComponent(pass)}?format=${format}`;
+}
+
 /**
- * Download Report (PDF/Excel)
+ * Download Report (PDF/Excel/HTML) for a logged-in user with report.export.
+ * With share=true it returns a short link to a read-only shared copy instead.
  */
 async function downloadReport(req, res, next) {
   try {
-    const { level, id, format, academicYear, startDate, endDate, type, status, share, view = 'transactions', sortBy = 'total', order = 'desc' } = req.query;
-
+    const { format, share } = req.query;
     if (!['pdf', 'excel', 'html'].includes(format)) {
       return res.status(400).json({ success: false, message: 'Invalid format. Use pdf, excel or html.' });
     }
+    if (share === 'true') {
+      const hours = Math.min(720, Math.max(1, Number(process.env.REPORT_SHARE_TTL_HOURS) || 168));
+      const pass = createSharePass(req.query, req.user, hours);
+      const shortUrl = await createShortLink(sharedReportUrl(req, pass, 'html'));
+      return res.json({ success: true, shareLink: shortUrl, expiresInHours: hours });
+    }
+    // HTML view buttons (PDF/Excel) use a short-lived pass instead of the login token.
+    const buttonPass = format === 'html' ? createSharePass(req.query, req.user, 1) : null;
+    return await sendReport(req, res, { ...pickReportQuery(req.query), format }, req.user?.name, buttonPass);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Public, read-only view of a shared report: GET /api/v1/reports/shared/:pass?format=html|pdf|excel
+ */
+async function downloadSharedReport(req, res, next) {
+  try {
+    const format = req.query.format || 'html';
+    if (!['pdf', 'excel', 'html'].includes(format)) {
+      return res.status(400).json({ success: false, message: 'Invalid format. Use pdf, excel or html.' });
+    }
+    let payload;
+    try {
+      payload = readSharePass(req.params.pass);
+    } catch (error) {
+      if (error.status === 503) throw error;
+      return res.status(401).json({ success: false, message: 'This report link is invalid or has expired.' });
+    }
+    return await sendReport(req, res, { ...payload.q, format }, 'Shared report link', req.params.pass);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function sendReport(req, res, query, generatedBy, buttonPass) {
+  {
+    const { level, id, format, academicYear, startDate, endDate, type, status, view = 'transactions', sortBy = 'total', order = 'desc' } = query;
 
     // Reuse filter logic
     let filter = {};
@@ -164,7 +246,7 @@ async function downloadReport(req, res, next) {
       level: level || 'College',
       title: `${(level || 'College').toUpperCase()} Credit Report ${id ? `- ${id}` : ''}`,
       date: new Date().toLocaleString(),
-      generatedBy: req.user?.name || 'Administrative System'
+      generatedBy: generatedBy || 'Administrative System'
     };
 
     const verificationTotals = view === 'ranking'
@@ -179,22 +261,6 @@ async function downloadReport(req, res, next) {
           positive: data.filter(item => item.type === 'positive').reduce((sum, item) => sum + Math.abs(Number(item.points) || 0), 0),
           negative: data.filter(item => item.type === 'negative').reduce((sum, item) => sum + Math.abs(Number(item.points) || 0), 0),
         };
-
-    // Shareable Link logic
-    if (share === 'true') {
-      const queryParams = new URLSearchParams(req.query);
-      queryParams.delete('share');
-      // Set default format to html for shareable links
-      queryParams.set('format', 'html');
-      
-      // Pass the current token so the link is authorized (simple solution for now)
-      const currentToken = req.headers.authorization?.split(' ')[1] || req.query.token;
-      if (currentToken) queryParams.set('token', currentToken);
-      
-      const downloadUrl = `${req.protocol}://${req.get('host')}/api/v1/reports/download?${queryParams.toString()}`;
-      const shortUrl = await createShortLink(downloadUrl);
-      return res.json({ success: true, shareLink: shortUrl });
-    }
 
     let buffer;
     let contentType;
@@ -211,21 +277,12 @@ async function downloadReport(req, res, next) {
       buffer = await createExcelReport(data, metadata, view, verification);
       contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     } else if (format === 'html') {
-      // Helper to build download links for buttons
-      const baseUrl = `${req.protocol}://${req.get('host')}/api/v1/reports/download`;
-      const q = new URLSearchParams(req.query);
-      
-      // Preserve token in the download buttons
-      const currentToken = req.headers.authorization?.split(' ')[1] || req.query.token;
-      if (currentToken) q.set('token', currentToken);
-
-      q.set('format', 'pdf');
-      const pdfUrl = `${baseUrl}?${q.toString()}`;
-      
-      q.set('format', 'excel');
-      const excelUrl = `${baseUrl}?${q.toString()}`;
+      // Download buttons use the report pass (never the login token).
+      const pdfUrl = buttonPass ? sharedReportUrl(req, buttonPass, 'pdf') : '#';
+      const excelUrl = buttonPass ? sharedReportUrl(req, buttonPass, 'excel') : '#';
 
       const html = createHtmlReport(data, metadata, { pdf: pdfUrl, excel: excelUrl }, view);
+      res.setHeader('Referrer-Policy', 'no-referrer');
       return res.send(html);
     } else {
       buffer = await createPdfReport(data, metadata, view, verification);
@@ -238,11 +295,8 @@ async function downloadReport(req, res, next) {
       res.setHeader('X-FCS-Document-ID', verification.documentId);
       res.setHeader('X-FCS-Content-SHA256', verification.contentHash);
     }
-    res.send(buffer);
-
-  } catch (err) {
-    next(err);
+    return res.send(buffer);
   }
 }
 
-module.exports = { getReportData, downloadReport };
+module.exports = { getReportData, downloadReport, downloadSharedReport };
