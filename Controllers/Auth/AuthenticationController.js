@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../../Models/User');
 const { generateFacultyID, generateApiKey } = require('../../utils/generateID');
 const { verifyTotpToken, generateMfaCode, sendMfaEmail } = require('../../utils/mfa');
+const { issueMfaTicket, hashCode, isLocked, failedAttemptChanges, SUCCESS_CHANGES, LOCK_MINUTES } = require('../../utils/mfaTicket');
 const { schemas } = require('../../utils/validation');
 const Session = require('../../Models/Session');
 const { permissionsFor } = require('../../config/permissions');
@@ -108,19 +109,30 @@ async function login(req, res, next) {
     // MFA Logic
     const targetUserId = user._id || user.id;
 
-    if (user.mfaEnabled) {
+    if (user.mfaEnabled && (user.mfaAppEnabled || user.mfaEmailEnabled)) {
+      if (isLocked(user)) {
+        return res.status(429).json({ success: false, message: `Too many wrong verification codes. Try again in ${LOCK_MINUTES()} minutes.` });
+      }
+      // The ticket proves the password step passed; verify-mfa requires it (SEC-06).
+      const mfaTicket = issueMfaTicket(user);
       if (user.mfaAppEnabled) {
         if (!mfaToken) {
-          return res.json({ success: true, mfaRequired: true, mfaType: 'app', userId: targetUserId });
+          return res.json({ success: true, mfaRequired: true, mfaType: 'app', userId: targetUserId, mfaTicket });
         }
         const valid = verifyTotpToken(user.mfaSecret, mfaToken);
-        if (!valid) return res.status(400).json({ success: false, message: 'Invalid MFA code' });
+        if (!valid) {
+          const { locked, changes } = failedAttemptChanges(user);
+          await User.update(targetUserId, changes);
+          return res.status(locked ? 429 : 400).json({ success: false, message: locked ? `Too many wrong verification codes. Try again in ${LOCK_MINUTES()} minutes.` : 'Invalid MFA code' });
+        }
+        if (user.mfaFailedAttempts || user.mfaLockedUntil) await User.update(targetUserId, SUCCESS_CHANGES);
       }
       else if (user.mfaEmailEnabled) {
         const code = generateMfaCode();
-        await User.update(targetUserId, { mfaCode: code, mfaCodeExpires: Date.now() + 300000 });
+        // Stored as an HMAC, never in plain text (SEC-25).
+        await User.update(targetUserId, { mfaCode: hashCode(code), mfaCodeExpires: Date.now() + 300000 });
         await sendMfaEmail(user, code);
-        return res.json({ success: true, mfaRequired: true, mfaType: 'email', userId: targetUserId });
+        return res.json({ success: true, mfaRequired: true, mfaType: 'email', userId: targetUserId, mfaTicket });
       }
     }
 
@@ -129,33 +141,43 @@ async function login(req, res, next) {
       user.fcmToken = fcmToken;
     }
 
-    const session = await createLoginSession(user, req);
-    const token = jwt.sign(
-      { id: targetUserId, role: user.role, sessionId: session._id },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
-    );
-
-    res.json({
-      success: true,
-      mfaRequired: false,
-      data: {
-        id: targetUserId,
-        name: user.name,
-        role: user.role,
-        fcmToken: user.fcmToken || null,
-        whatsappNumber: user.whatsappNumber || null,
-        whatsappVerified: user.whatsappVerified ?? false,
-        permissions: permissionsFor(user),
-        token,
-        sessionId: session._id,
-        sessionExpiresAt: session.expiresAt,
-      }
-    });
+    res.json(await completeLogin(user, req));
 
   } catch (err) {
     next(err);
   }
 }
 
-module.exports = { register, login, createLoginSession };
+/**
+ * Creates a session and a session-bound token for a fully authenticated user.
+ * Used by password login and by the MFA step, so both behave identically.
+ */
+async function completeLogin(user, req) {
+  const userId = user._id || user.id;
+  const session = await createLoginSession(user, req);
+  const token = jwt.sign(
+    { id: userId, role: user.role, sessionId: session._id },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
+  );
+  return {
+    success: true,
+    mfaRequired: false,
+    token, // kept at top level for older clients
+    sessionId: session._id,
+    data: {
+      id: userId,
+      name: user.name,
+      role: user.role,
+      fcmToken: user.fcmToken || null,
+      whatsappNumber: user.whatsappNumber || null,
+      whatsappVerified: user.whatsappVerified ?? false,
+      permissions: permissionsFor(user),
+      token,
+      sessionId: session._id,
+      sessionExpiresAt: session.expiresAt,
+    }
+  };
+}
+
+module.exports = { register, login, createLoginSession, completeLogin };

@@ -12,7 +12,7 @@ const {
 const { register, login } = require('../Controllers/Auth/AuthenticationController');
 const { bulkRegister } = require('../Controllers/Auth/BulkImportController');
 const { forgotPassword, resetPassword } = require('../Controllers/Auth/PasswordController');
-const { enableAppMfa, verifyAppMfaSetup } = require('../Controllers/Auth/MfaController');
+const { enableAppMfa, verifyAppMfaSetup, verifyMfaLogin } = require('../Controllers/Auth/MfaController');
 
 const { authMiddleware, adminOnly } = require('../Middleware/authMiddleware');
 const multer = require('multer');
@@ -33,7 +33,7 @@ router.post('/mfa/enable-app', authMiddleware, enableAppMfa);
 router.post('/mfa/verify-app-setup', authMiddleware, verifyAppMfaSetup);
 router.post('/mfa/toggle-email', authMiddleware, toggleEmailMfa);
 router.post('/mfa/disable-all', authMiddleware, disableAllMfa);
-router.post('/verify-mfa', verifyMfa);
+router.post('/verify-mfa', verifyMfaLogin); // requires the mfaTicket from /login (SEC-06)
 
 router.post('/change-password', authMiddleware, changePassword);
 

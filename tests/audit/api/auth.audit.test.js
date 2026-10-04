@@ -96,51 +96,83 @@ describe('MFA', () => {
     expect(bad.status).toBe(400);
   });
 
-  test('email MFA: code is emailed and verify-mfa returns a token', async () => {
+  /** Password step for the email-MFA user; returns the ticket and the emailed code. */
+  async function emailMfaStep() {
     sendEmail.mockClear();
     const res = await api().post(LOGIN).send({ email: 'mfa-email@example.org', password: PASSWORD });
     expect(res.body).toMatchObject({ mfaRequired: true, mfaType: 'email' });
-    const code = (await db.get('users', ID.mfaEmail)).mfaCode;
-    expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: 'mfa-email@example.org' }));
-    const v = await api().post('/api/v1/auth/verify-mfa').send({ userId: ID.mfaEmail, code });
+    expect(res.body.mfaTicket).toBeTruthy();
+    const mail = sendEmail.mock.calls.find((c) => c[0].to === 'mfa-email@example.org')[0];
+    const code = mail.text.match(/\b(\d{6})\b/)[1];
+    return { ticket: res.body.mfaTicket, code };
+  }
+  const resetMfaUser = async () => db.put('users', { ...(await db.get('users', ID.mfaEmail)), mfaFailedAttempts: 0, mfaLockedUntil: null });
+
+  test('email MFA: code is emailed and verify-mfa (with ticket) returns a session-bound token', async () => {
+    await resetMfaUser();
+    const { ticket, code } = await emailMfaStep();
+    const v = await api().post('/api/v1/auth/verify-mfa').send({ mfaTicket: ticket, code });
     expect(v.status).toBe(200);
-    expect(v.body.token).toBeTruthy();
+    expect(v.body.data.token).toBeTruthy();
+    expect(jwt.decode(v.body.data.token).sessionId).toBeTruthy();
   });
 
   test('email MFA code cannot be reused', async () => {
-    await api().post(LOGIN).send({ email: 'mfa-email@example.org', password: PASSWORD });
-    const code = (await db.get('users', ID.mfaEmail)).mfaCode;
-    expect((await api().post('/api/v1/auth/verify-mfa').send({ userId: ID.mfaEmail, code })).status).toBe(200);
-    expect((await api().post('/api/v1/auth/verify-mfa').send({ userId: ID.mfaEmail, code })).status).toBe(400);
+    await resetMfaUser();
+    const { ticket, code } = await emailMfaStep();
+    expect((await api().post('/api/v1/auth/verify-mfa').send({ mfaTicket: ticket, code })).status).toBe(200);
+    expect((await api().post('/api/v1/auth/verify-mfa').send({ mfaTicket: ticket, code })).status).toBe(400);
   });
 
-  test.failing('[BUG] email MFA code is stored in plain text in the database', async () => {
-    await api().post(LOGIN).send({ email: 'mfa-email@example.org', password: PASSWORD });
+  test('[FIXED SEC-25] email MFA code is not stored in plain text', async () => {
+    await resetMfaUser();
+    const { code } = await emailMfaStep();
     const stored = (await db.get('users', ID.mfaEmail)).mfaCode;
-    expect(stored).not.toMatch(/^\d{6}$/); // expected: a hash, not the code itself
+    expect(stored).not.toBe(code);
+    expect(stored).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  test.failing('[BUG] verify-mfa has no attempt limit (code can be brute-forced)', async () => {
-    await api().post(LOGIN).send({ email: 'mfa-email@example.org', password: PASSWORD });
-    const code = (await db.get('users', ID.mfaEmail)).mfaCode;
-    for (let i = 0; i < 20; i++) {
-      const guess = String(100000 + i);
-      if (guess !== code) await api().post('/api/v1/auth/verify-mfa').send({ userId: ID.mfaEmail, code: guess });
+  test('[FIXED SEC-07] wrong MFA codes are limited: after 5, the code is cancelled and the account paused', async () => {
+    await resetMfaUser();
+    const { ticket, code } = await emailMfaStep();
+    let last;
+    for (let i = 0; i < 5; i++) {
+      const guess = String(100000 + i) === code ? '999999' : String(100000 + i);
+      last = await api().post('/api/v1/auth/verify-mfa').send({ mfaTicket: ticket, code: guess });
     }
-    const res = await api().post('/api/v1/auth/verify-mfa').send({ userId: ID.mfaEmail, code });
-    expect(res.status).not.toBe(200); // expected: code invalidated after ~5 wrong attempts
+    expect(last.status).toBe(429);
+    expect((await api().post('/api/v1/auth/verify-mfa').send({ mfaTicket: ticket, code })).status).toBe(429);
+    // Even the password step is paused for this account while locked.
+    expect((await api().post(LOGIN).send({ email: 'mfa-email@example.org', password: PASSWORD })).status).toBe(429);
+    await resetMfaUser();
   });
 
-  test.failing('[BUG] verify-mfa skips the password step: anyone with a userId + MFA code gets a token', async () => {
-    // The email code is the ONLY factor checked here. With app MFA, the TOTP alone (no password) logs in.
+  test('[FIXED SEC-06] verify-mfa no longer accepts a userId (or email) instead of the password step', async () => {
     const totp = speakeasy.totp({ secret: db.MFA_SECRET, encoding: 'base32' });
-    const res = await api().post('/api/v1/auth/verify-mfa').send({ userId: ID.mfaApp, code: totp });
-    expect(res.status).not.toBe(200); // expected: requires a short-lived "password verified" ticket
+    expect((await api().post('/api/v1/auth/verify-mfa').send({ userId: ID.mfaApp, code: totp })).status).toBe(401);
+    expect((await api().post('/api/v1/auth/verify-mfa').send({ email: 'mfa-app@example.org', code: totp })).status).toBe(401);
   });
 
-  test('verify-mfa for a user without MFA -> 400', async () => {
-    const res = await api().post('/api/v1/auth/verify-mfa').send({ userId: ID.faculty1, code: '123456' });
-    expect(res.status).toBe(400);
+  test('verify-mfa: forged, expired or login tokens are not accepted as tickets', async () => {
+    const totp = speakeasy.totp({ secret: db.MFA_SECRET, encoding: 'base32' });
+    const forged = jwt.sign({ purpose: 'mfa-login', uid: ID.mfaApp }, 'attacker-secret');
+    const expired = jwt.sign({ purpose: 'mfa-login', uid: ID.mfaApp }, process.env.JWT_SECRET, { expiresIn: -5 });
+    const loginToken = await tokenFor(ID.mfaApp, 'faculty');
+    for (const t of [forged, expired, loginToken]) {
+      expect((await api().post('/api/v1/auth/verify-mfa').send({ mfaTicket: t, code: totp })).status).toBe(401);
+    }
+  });
+
+  test('app MFA: ticket + valid TOTP logs in', async () => {
+    const step = await api().post(LOGIN).send({ email: 'mfa-app@example.org', password: PASSWORD });
+    const totp = speakeasy.totp({ secret: db.MFA_SECRET, encoding: 'base32' });
+    const v = await api().post('/api/v1/auth/verify-mfa').send({ mfaTicket: step.body.mfaTicket, code: totp, type: 'app' });
+    expect(v.status).toBe(200);
+  });
+
+  test('an MFA ticket cannot be used as a login token', async () => {
+    const step = await api().post(LOGIN).send({ email: 'mfa-app@example.org', password: PASSWORD });
+    expect((await api().get('/api/v1/auth/profile').set(auth(step.body.mfaTicket))).status).toBe(401);
   });
 
   test.failing('[BUG] MFA can be switched off with only a login token (no password or code)', async () => {

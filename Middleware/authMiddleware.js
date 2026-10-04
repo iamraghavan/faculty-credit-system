@@ -11,7 +11,9 @@ async function authMiddleware(req, res, next) {
   if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+    // Purpose-specific tokens (e.g. the MFA ticket) are never login tokens.
+    if (decoded.purpose || !decoded.id) return res.status(401).json({ success: false, message: 'Invalid token' });
     const user = await User.findById(decoded.id);
     if (!user) return res.status(401).json({ success: false, message: 'Unauthorized' });
     if (user.isActive === false) return res.status(403).json({ success: false, message: 'Account is inactive' });
