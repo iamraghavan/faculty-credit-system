@@ -28,7 +28,12 @@ module.exports = {
             createdAt: new Date().toISOString(),
         };
 
-        await client.send(new PutCommand({ TableName: TABLE, Item: item }));
+        // Never overwrite an existing link (that would let anyone repoint it).
+        await client.send(new PutCommand({
+            TableName: TABLE, Item: item,
+            ConditionExpression: 'attribute_not_exists(#id)',
+            ExpressionAttributeNames: { '#id': '_id' },
+        }));
         return item;
     },
 

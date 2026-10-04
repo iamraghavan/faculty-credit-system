@@ -75,7 +75,7 @@ describe('faculty submits a positive credit (good work)', () => {
       .field('title', 'With proof').field('points', '3').field('academicYear', '2025-2026')
       .attach('proof', Buffer.from('%PDF-1.4 test'), 'proof.pdf');
     expect(res.status).toBe(201);
-    expect(res.body.data.proofUrl).toMatch(/\/s\/[0-9a-f]{6}$/);
+    expect(res.body.data.proofUrl).toMatch(/\/s\/[0-9a-f]{12}$/);
   });
 
   test.failing('[BUG] blocked file type returns 500 instead of a clear 400', async () => {

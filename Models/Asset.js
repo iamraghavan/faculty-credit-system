@@ -25,7 +25,12 @@ module.exports = {
             createdAt: new Date().toISOString(),
         };
 
-        await client.send(new PutCommand({ TableName: TABLE, Item: item }));
+        // Never overwrite an existing asset mapping.
+        await client.send(new PutCommand({
+            TableName: TABLE, Item: item,
+            ConditionExpression: 'attribute_not_exists(#id)',
+            ExpressionAttributeNames: { '#id': '_id' },
+        }));
         return item;
     },
 

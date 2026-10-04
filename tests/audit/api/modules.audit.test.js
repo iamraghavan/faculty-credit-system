@@ -13,29 +13,53 @@ beforeAll(async () => { await setupApp(); T = await tokens(); });
 afterAll(() => teardownApp());
 
 describe('CDN assets and short links', () => {
-  test.failing('[BUG][CRITICAL] anyone (no login) can create a short link to any site (open redirect)', async () => {
+  test('[FIXED SEC-02] creating a short link requires login', async () => {
     const res = await api().post('/api/v1/url/shorten').send({ url: 'https://evil.example.net/phish' });
     expect(res.status).toBe(401);
   });
 
-  test.failing('[BUG][CRITICAL] anyone (no login) can OVERWRITE an existing proof link', async () => {
+  test('[FIXED SEC-02] an existing proof link cannot be overwritten', async () => {
     await db.put('shortUrls', { _id: 'abc123', originalUrl: 'https://cdn.jsdelivr.net/gh/x/y@main/real-proof.pdf', visits: 0 });
     await api().post('/api/v1/url/shorten').send({ url: 'https://evil.example.net/phish', alias: 'abc123' });
     const res = await api().get('/s/abc123');
     expect(res.headers.location).toBe('https://cdn.jsdelivr.net/gh/x/y@main/real-proof.pdf');
   });
 
-  test.failing('[BUG][CRITICAL] anyone (no login) can overwrite a CDN asset mapping', async () => {
+  test('[FIXED SEC-03] a CDN asset mapping cannot be overwritten', async () => {
     await db.put('assets', { _id: 'logo-v1', targetUrl: 'https://cdn.jsdelivr.net/gh/x/y@main/logo.png' });
     await api().post('/cdn/assets').send({ id: 'logo-v1', targetUrl: 'javascript:alert(1)' });
     expect((await db.get('assets', 'logo-v1')).targetUrl).toBe('https://cdn.jsdelivr.net/gh/x/y@main/logo.png');
+  });
+
+  test('logged-in user can shorten a link to this app; other websites are refused', async () => {
+    const ok = await api().post('/api/v1/url/shorten').set(auth(T.faculty)).send({ url: 'http://localhost:9002/u/portal/dashboard' });
+    expect(ok.status).toBe(200);
+    expect(ok.body.shortUrl).toMatch(/\/s\/[0-9a-f]{12}$/);
+    const evil = await api().post('/api/v1/url/shorten').set(auth(T.faculty)).send({ url: 'https://evil.example.net/phish' });
+    expect(evil.status).toBe(400);
+    const js = await api().post('/api/v1/url/shorten').set(auth(T.faculty)).send({ url: 'javascript:alert(1)' });
+    expect(js.status).toBe(400);
+  });
+
+  test('a custom alias is ignored, even when logged in', async () => {
+    await db.put('shortUrls', { _id: 'keepme', originalUrl: 'https://cdn.jsdelivr.net/gh/test-owner/test-repo@main/a.pdf', visits: 0 });
+    const res = await api().post('/api/v1/url/shorten').set(auth(T.admin)).send({ url: 'http://localhost:9002/x', alias: 'keepme' });
+    expect(res.body.shortUrl).not.toMatch(/keepme/);
+    expect((await db.get('shortUrls', 'keepme')).originalUrl).toMatch(/a\.pdf$/);
+  });
+
+  test('creating CDN assets is admin-only and limited to own storage', async () => {
+    const target = 'https://cdn.jsdelivr.net/gh/test-owner/test-repo@main/x.pdf';
+    expect((await api().post('/cdn/assets').set(auth(T.faculty)).send({ targetUrl: target })).status).toBe(403);
+    expect((await api().post('/cdn/assets').set(auth(T.admin)).send({ targetUrl: 'https://evil.example.net/x' })).status).toBe(400);
+    expect((await api().post('/cdn/assets').set(auth(T.admin)).send({ targetUrl: target })).status).toBe(201);
   });
 
   test('unknown short link -> 404', async () => {
     expect((await api().get('/s/zzzzzz')).status).toBe(404);
   });
 
-  test.failing('[BUG] short link ids are only 6 hex characters (16.7 million) and guessable', () => {
+  test('[FIXED SEC-24] short link ids are no longer 6 characters', () => {
     // Documented from utils/urlHelper.js: crypto.randomBytes(4).toString('hex').slice(0, 6).
     const { createShortLink } = require('../../../utils/urlHelper');
     expect(createShortLink.toString()).not.toMatch(/slice\(0,\s*6\)/);

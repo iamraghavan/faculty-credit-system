@@ -1,6 +1,6 @@
 const Asset = require('../Models/Asset');
 const ShortUrl = require('../Models/ShortUrl');
-const { createMaskedUrl, createShortLink } = require('../utils/urlHelper');
+const { createMaskedUrl, createShortLink, isAllowedShortLinkTarget } = require('../utils/urlHelper');
 
 // Map of predefined static assets (fallback/hardcoded for critical ones if DB fails or for speed)
 const STATIC_ASSETS = {
@@ -43,25 +43,14 @@ async function getAsset(req, res, next) {
  */
 async function createAsset(req, res, next) {
     try {
-        const { id, targetUrl, mimeType } = req.body;
+        const { targetUrl, mimeType } = req.body || {};
         if (!targetUrl) return res.status(400).json({ success: false, message: 'targetUrl is required' });
-
-        // Logic: If user provides ID, we use Asset.create directly.
-        // If not, use utility to generate one.
-
-        if (id) {
-            // Enforce specific ID
-            await Asset.create({ id, targetUrl, mimeType });
-            return res.json({
-                success: true,
-                message: 'Asset created',
-                url: `${process.env.APP_URL || 'https://fcs.egspgroup.in'}/cdn/assets/v1/${id}`
-            });
-        } else {
-            // Generate one
-            const url = await createMaskedUrl(targetUrl, mimeType);
-            return res.json({ success: true, message: 'Asset created', url });
+        if (!isAllowedShortLinkTarget(targetUrl)) {
+            return res.status(400).json({ success: false, message: 'targetUrl must point to this application or its file storage' });
         }
+        // Client-chosen ids are not accepted: they allowed overwriting existing assets.
+        const url = await createMaskedUrl(targetUrl, mimeType);
+        return res.status(201).json({ success: true, message: 'Asset created', url });
     } catch (err) {
         next(err);
     }
@@ -94,10 +83,13 @@ async function getShortUrl(req, res, next) {
  */
 async function createShortUrl(req, res, next) {
     try {
-        const { url, alias } = req.body;
-        if (!url) return res.status(400).json({ success: false, message: 'URL is required' });
-
-        const shortUrl = await createShortLink(url, alias);
+        const { url } = req.body || {};
+        if (!url || typeof url !== 'string') return res.status(400).json({ success: false, message: 'URL is required' });
+        if (!isAllowedShortLinkTarget(url)) {
+            return res.status(400).json({ success: false, message: 'Only links to this application or its file storage can be shortened' });
+        }
+        // Custom aliases are ignored: they allowed overwriting existing links.
+        const shortUrl = await createShortLink(url);
         res.json({ success: true, shortUrl });
     } catch (err) {
         next(err);
