@@ -1,5 +1,8 @@
 // server.js - Express app configuration
 
+// Check settings before anything else (see config/env.js).
+require('./config/env').checkEnvironment();
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
