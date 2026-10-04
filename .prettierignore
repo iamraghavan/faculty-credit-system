@@ -1,0 +1,8 @@
+node_modules
+coverage
+.dynamodb-local
+pnpm-lock.yaml
+swagger.json
+Postman
+*.postman_collection.json
+email-templates

@@ -14,7 +14,12 @@
     "test:db:install": "node scripts/test/install-dynamodb-local.js",
     "db:local": "node scripts/test/db-local.js",
     "test:server": "node tests/support/testServer.js",
-    "smoke": "node scripts/test/smoke.js"
+    "smoke": "node scripts/test/smoke.js",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepare": "husky || true"
   },
   "keywords": [],
   "author": "",
@@ -64,17 +69,33 @@
     "xss-clean": "^0.1.4"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "autocannon": "^8.0.0",
     "eslint": "^9.37.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-security": "^4.2.0",
+    "globals": "^17.13.0",
+    "husky": "^9.1.7",
     "jest": "^30.4.2",
+    "lint-staged": "^17.6.0",
     "mongodb-memory-server": "^11.2.0",
     "nock": "^14.0.17",
     "nodemon": "^3.1.10",
+    "prettier": "^3.9.9",
     "supertest": "^7.2.2",
     "swagger-autogen": "^2.23.7"
   },
   "packageManager": "pnpm@10.15.1",
   "engines": {
     "node": ">=22"
+  },
+  "lint-staged": {
+    "*.js": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
   }
 }
