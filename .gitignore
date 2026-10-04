@@ -21,3 +21,7 @@ setup_env.js
 # Audit test tooling (local only)
 .dynamodb-local/
 test-results/
+
+# This project uses pnpm only (see package.json "packageManager").
+package-lock.json
+yarn.lock
