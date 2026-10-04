@@ -1,6 +1,6 @@
 const { CreateTableCommand, ListTablesCommand } = require('@aws-sdk/client-dynamodb');
-const { connectDB, getDynamoClient } = require('./config/db');
-require('dotenv').config();
+const { connectDB, getDynamoClient } = require('../config/db');
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
 const TABLES = [
     {
