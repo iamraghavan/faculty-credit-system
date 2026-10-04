@@ -52,7 +52,7 @@ describe('faculty submits a positive credit (good work)', () => {
     expect((await submit(T.faculty, b)).status).toBe(400);
   });
 
-  test.failing('[BUG] no upper limit: faculty can claim 1,000,000,000 points', async () => {
+  test('[FIXED] no upper limit: faculty can claim 1,000,000,000 points', async () => {
     expect((await submit(T.faculty, { ...body, points: 1e9 })).status).toBe(400);
   });
 
@@ -135,12 +135,12 @@ describe('faculty edits / withdraws own pending submission', () => {
     expect((await api().put(`${C}/credits/positive/${newId()}`).set(auth(T.faculty)).send({ points: 1 })).status).toBe(404);
   });
 
-  test.failing('[BUG] edit accepts negative points', async () => {
+  test('[FIXED] edit accepts negative points', async () => {
     const id = await addCredit(ID.faculty1, 'positive', 5, 'pending');
     expect((await api().put(`${C}/credits/positive/${id}`).set(auth(T.faculty)).send({ points: -50 })).status).toBe(400);
   });
 
-  test.failing('[BUG] edit accepts non-numeric points and then breaks score recalculation', async () => {
+  test('[FIXED] edit accepts non-numeric points and then breaks score recalculation', async () => {
     const id = await addCredit(ID.faculty2, 'positive', 5, 'pending');
     const res = await api().put(`${C}/credits/positive/${id}`).set(auth(T.faculty2)).send({ points: 'abc' });
     const stored = await db.get('credits', id);
@@ -148,19 +148,19 @@ describe('faculty edits / withdraws own pending submission', () => {
     expect(res.status).toBe(400);
   });
 
-  test.failing('[BUG][CRITICAL] faculty can change the points of a NEGATIVE remark issued to them', async () => {
+  test('[FIXED SEC-01] faculty can change the points of a NEGATIVE remark issued to them', async () => {
     const id = await addCredit(ID.faculty1, 'negative', -5, 'pending', { issuedBy: ID.oa1 });
     const res = await api().put(`${C}/credits/positive/${id}`).set(auth(T.faculty)).send({ points: 0.01 });
     const after = await db.get('credits', id);
-    expect(res.status).toBe(400);
+    expect([400, 403]).toContain(res.status);
     expect(after.points).toBe(-5);
   });
 
-  test.failing('[BUG][CRITICAL] faculty can VOID a negative remark issued to them', async () => {
+  test('[FIXED SEC-01] faculty can VOID a negative remark issued to them', async () => {
     const id = await addCredit(ID.faculty1, 'negative', -5, 'pending', { issuedBy: ID.oa1 });
     const res = await api().delete(`${C}/credits/positive/${id}`).set(auth(T.faculty));
     const after = await db.get('credits', id);
-    expect(res.status).toBe(400);
+    expect([400, 403]).toContain(res.status);
     expect(after.status).toBe('pending');
   });
 

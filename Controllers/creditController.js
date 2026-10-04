@@ -30,6 +30,21 @@ async function ensureDb() {
 const { createMaskedUrl, createShortLink } = require('../utils/urlHelper');
 
 /**
+ * Points a faculty member may claim: a finite number > 0, at most two
+ * decimals, not above the institution-wide limit (MAX_ISSUED_CREDIT_POINTS,
+ * the same limit used when admins/OAs issue credits). Returns null if invalid.
+ */
+function maxSubmittedPoints() {
+  return Math.max(1, Number(process.env.MAX_ISSUED_CREDIT_POINTS) || 10000);
+}
+function parseSubmittedPoints(value) {
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  const points = Number(value);
+  if (!Number.isFinite(points) || points <= 0 || points > maxSubmittedPoints()) return null;
+  return Math.round(points * 100) / 100;
+}
+
+/**
  * Helper to calculate appeal eligibility
  */
 function getAppealEligibility(credit) {
@@ -86,9 +101,9 @@ async function submitPositiveCredit(req, res, next) {
     if (!title || !points || !academicYear)
       return res.status(400).json({ success: false, message: 'Missing required fields' });
 
-    points = Number(points);
-    if (points <= 0 || isNaN(points))
-      return res.status(400).json({ success: false, message: 'Points must be a positive number' });
+    points = parseSubmittedPoints(points);
+    if (points === null)
+      return res.status(400).json({ success: false, message: `Points must be a positive number up to ${maxSubmittedPoints()}` });
 
     // Validate categories if provided (categories are expected to be CreditTitle IDs)
     let categoryIds = [];
@@ -903,18 +918,25 @@ async function updatePositiveCredit(req, res, next) {
   try {
     await ensureDb();
     const { creditId } = req.params;
-    const { title, points, academicYear, points: pointsBody, notes } = req.body; // points might be string
+    const { title, points, academicYear, notes } = req.body; // points might be string
     const faculty = req.user;
 
     const credit = await Credit.findById(creditId);
     if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
 
     if (String(credit.faculty) !== String(faculty._id)) return res.status(403).json({ success: false, message: 'Unauthorized' });
+    // Negative remarks are also owned by the faculty member and start as 'pending';
+    // they must never be editable through the good-work endpoints.
+    if (credit.type !== 'positive') return res.status(403).json({ success: false, message: 'Only your own good-work submissions can be edited here' });
     if (credit.status !== 'pending') return res.status(400).json({ success: false, message: 'Can only edit pending credits' });
 
     let updates = {};
     if (title) updates.title = title;
-    if (points) updates.points = Number(points);
+    if (points !== undefined && points !== '') {
+      const parsed = parseSubmittedPoints(points);
+      if (parsed === null) return res.status(400).json({ success: false, message: `Points must be a positive number up to ${maxSubmittedPoints()}` });
+      updates.points = parsed;
+    }
     if (academicYear) updates.academicYear = academicYear;
     if (notes !== undefined) updates.notes = notes;
 
@@ -943,6 +965,7 @@ async function deletePositiveCredit(req, res, next) {
     const credit = await Credit.findById(creditId);
     if (!credit) return res.status(404).json({ success: false, message: 'Credit not found' });
     if (String(credit.faculty) !== String(faculty._id)) return res.status(403).json({ success: false, message: 'Unauthorized' });
+    if (credit.type !== 'positive') return res.status(403).json({ success: false, message: 'Only your own good-work submissions can be withdrawn here' });
     if (credit.status !== 'pending') return res.status(400).json({ success: false, message: 'Can only delete pending credits' });
 
     try {
