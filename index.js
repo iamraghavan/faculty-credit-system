@@ -1,5 +1,6 @@
 // index.js
 require('dotenv').config();
+require('./instrument'); // error tracking (no-op unless SENTRY_DSN is set)
 const http = require('http');
 const app = require('./server'); // your Express app
 const { connectDB } = require('./config/db');

@@ -1,4 +1,5 @@
 // lambda.js
+require('./instrument'); // error tracking (no-op unless SENTRY_DSN is set)
 const serverlessExpress = require('@vendia/serverless-express');
 const app = require('./server'); 
 const { connectDB } = require('./config/db');

@@ -1,4 +1,5 @@
 // api/index.js
+require('../instrument'); // error tracking (no-op unless SENTRY_DSN is set)
 const app = require('../server');
 const { connectDB } = require('../config/db');
 

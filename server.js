@@ -150,6 +150,9 @@ app.use((req, res) => {
 });
 
 // Error handling middleware
+// Report unexpected errors to Sentry (only when SENTRY_DSN is set), then answer the client.
+const { Sentry, enabled: sentryEnabled } = require('./instrument');
+if (sentryEnabled) Sentry.setupExpressErrorHandler(app);
 app.use(errorHandler);
 
 module.exports = app;
