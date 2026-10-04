@@ -10,7 +10,6 @@ const { generateRemarkPdf } = require('../utils/pdfGenerator');
 const { sendPushToUser } = require('../Controllers/pushController');
 const { recalcFacultyCredits, processCredits } = require('../utils/calculateCredits');
 const { creditImpact } = require('../domain/creditAccounting');
-const io = require('../socket');
 const { connectDB } = require('../config/db');
 const { sendWhatsAppMessage } = require('../utils/whatsapp');
 const { sendRemarkNotificationHelper } = require('../utils/notificationHelper');
@@ -146,7 +145,6 @@ async function submitPositiveCredit(req, res, next) {
 
     // recalc and emit
     try { await recalcFacultyCredits(faculty._id); } catch (e) { /* log but continue */ }
-    io.emit(`faculty:${faculty._id}:creditUpdate`, creditDoc);
 
     // 2. Send Push Notification Confirmation
     sendPushToUser(String(faculty._id), {
@@ -214,7 +212,6 @@ async function adminIssueNegativeCredit(req, res, next) {
     // recalc then emit
     try { await recalcFacultyCredits(faculty._id); } catch (e) { /* log and continue */ }
 
-    io.emit(`faculty:${faculty._id}:creditUpdate`, c);
 
     // Send Push Notification
     sendPushToUser(String(faculty._id), {
@@ -951,7 +948,6 @@ async function updatePositiveCredit(req, res, next) {
     await Credit.update(creditId, updates);
     const updated = await Credit.findById(creditId);
 
-    io.emit(`faculty:${faculty._id}:creditUpdate`, updated);
 
     res.json({ success: true, data: updated });
   } catch (err) { next(err); }
@@ -1021,7 +1017,6 @@ async function updateAppeal(req, res, next) {
     });
     const updated = await Credit.findById(creditId);
 
-    io.emit(`faculty:${faculty._id}:creditUpdate`, updated);
     res.json({ success: true, data: updated });
   } catch (err) { next(err); }
 }
@@ -1049,7 +1044,6 @@ async function deleteAppeal(req, res, next) {
     });
 
     const updated = await Credit.findById(creditId);
-    io.emit(`faculty:${faculty._id}:creditUpdate`, updated);
     res.json({ success: true, message: 'Appeal withdrawn', data: updated });
   } catch (err) { next(err); }
 }
@@ -1159,7 +1153,6 @@ async function updateNegativeCredit(req, res, next) {
     try { await recalcFacultyCredits(credit.faculty); } catch (e) { }
 
     const updated = await Credit.findById(creditId);
-    io.emit(`faculty:${credit.faculty}:creditUpdate`, updated);
 
     return res.json({ success: true, data: updated, message: 'Negative credit updated' });
 
@@ -1195,7 +1188,6 @@ async function deleteNegativeCredit(req, res, next) {
     try { await recalcFacultyCredits(credit.faculty); } catch (e) { }
 
     // Notify FE about deletion (send ID or null)
-    io.emit(`faculty:${credit.faculty}:creditDelete`, { creditId, type: 'negative' });
 
     return res.json({ success: true, message: 'Negative credit voided; record preserved' });
   } catch (err) {

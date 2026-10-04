@@ -12,7 +12,6 @@ const {
   QueryCommand,
 } = require("@aws-sdk/lib-dynamodb");
 const { handleProfileImageUpload } = require('../utils/uploadProfileImage');
-const { generateFacultyID, generateApiKey } = require('../utils/generateID');
 
 const { 
   generateTotpSecret, 
@@ -127,149 +126,6 @@ async function updateProfile(req, res, next) {
   }
 }
 
-/**
- * Admin: create user
- */
-async function adminCreateUser(req, res, next) {
-  try {
-    const fields = req.fields || req.body || {};
-    const { name, email, password, college, department, role, prefix, roleCategory, designation, whatsappNumber } = fields;
-    if (!name || !email || !college || !password || !roleCategory || !designation)
-      return res.status(400).json({ success: false, message: 'Missing required fields' });
-
-    // Check if email exists
-    const scanParams = {
-      TableName: TABLE_NAME,
-      FilterExpression: 'email = :email',
-      ExpressionAttributeValues: { ':email': email },
-    };
-    const scanResult = await ddbDocClient.send(new ScanCommand(scanParams));
-    if (scanResult.Count > 0) return res.status(400).json({ success: false, message: 'User already exists' });
-
-    // Validate WhatsApp
-    if (whatsappNumber && !/^\d{10}$/.test(whatsappNumber)) {
-      return res.status(400).json({ success: false, message: 'WhatsApp number must be exactly 10 digits' });
-    }
-
-    const hashed = await bcrypt.hash(password, 10);
-    const facultyID = generateFacultyID(college);
-    const apiKey = generateApiKey();
-
-    const userData = {
-      id: facultyID,
-      name,
-      email,
-      password: hashed,
-      college,
-      department,
-      facultyID,
-      apiKey,
-      prefix: prefix || 'Mr.',
-      whatsappNumber: whatsappNumber || null,
-      whatsappVerified: false,
-      roleCategory,
-      designation,
-      role: role === 'admin' ? 'admin' : 'faculty',
-      isActive: true,
-      createdAt: new Date().toISOString(),
-    };
-
-    if (req.files?.profileImage) {
-      const file = req.files.profileImage;
-      userData.profileImage = await handleProfileImageUpload(file);
-    }
-
-    await ddbDocClient.send(new PutCommand({ TableName: TABLE_NAME, Item: userData }));
-    delete userData.password; // don't return password
-    res.status(201).json({ success: true, data: userData });
-  } catch (err) {
-    next(err);
-  }
-}
-
-/**
- * Admin: get user by ID
- */
-async function getUserById(req, res, next) {
-  try {
-    const params = { TableName: TABLE_NAME, Key: { _id: req.params.id } };
-    const result = await ddbDocClient.send(new GetCommand(params));
-    if (!result.Item) return res.status(404).json({ success: false, message: 'User not found' });
-    res.json({ success: true, data: sanitizeUser(result.Item) });
-  } catch (err) {
-    next(err);
-  }
-}
-
-/**
- * Admin: delete user
- */
-async function deleteUser(req, res, next) {
-  try {
-    const params = { TableName: TABLE_NAME, Key: { _id: req.params.id } };
-    await ddbDocClient.send(new UpdateCommand({ ...params,
-      UpdateExpression: 'SET isActive = :inactive, deactivatedAt = :at, deactivatedBy = :actor',
-      ConditionExpression: 'attribute_exists(#id)',
-      ExpressionAttributeNames: { '#id': '_id' },
-      ExpressionAttributeValues: { ':inactive': false, ':at': new Date().toISOString(), ':actor': String(req.user._id) },
-    }));
-    res.json({ success: true, message: 'Account deactivated; data preserved' });
-  } catch (err) {
-    next(err);
-  }
-}
-
-/**
- * Admin: update user
- */
-async function adminUpdateUser(req, res, next) {
-  try {
-    const fields = req.fields || req.body || {};
-    const allowedFields = ['name', 'email', 'phone', 'department', 'college', 'role', 'isActive', 'prefix', 'roleCategory', 'designation', 'whatsappNumber', 'whatsappVerified'];
-    const updates = {};
-    for (const field of allowedFields) {
-      if (fields[field] !== undefined) {
-        let value = fields[field];
-        // Cast string "true"/"false" to actual boolean
-        if (field === 'isActive') {
-          value = String(value).toLowerCase() === 'true';
-        }
-        updates[field] = value;
-      }
-    }
-
-    if (updates.whatsappNumber && !/^\d{10}$/.test(updates.whatsappNumber)) {
-      return res.status(400).json({ success: false, message: 'WhatsApp number must be exactly 10 digits' });
-    }
-
-    if (req.files?.profileImage) {
-      updates.profileImage = await handleProfileImageUpload(req.files.profileImage);
-    }
-
-    if (Object.keys(updates).length === 0) return res.status(400).json({ success: false, message: 'No updates provided' });
-
-    const updateKeys = Object.keys(updates);
-    const updateExpression = `SET ${updateKeys.map((k, i) => `#${k} = :${k}`).join(', ')}`;
-    const expressionAttributeNames = Object.fromEntries(updateKeys.map(k => [`#${k}`, k]));
-    const expressionAttributeValues = Object.fromEntries(updateKeys.map(k => [`:${k}`, updates[k]]));
-
-    const params = {
-      TableName: TABLE_NAME,
-      Key: { _id: req.params.id },
-      UpdateExpression: updateExpression,
-      ExpressionAttributeNames: expressionAttributeNames,
-      ExpressionAttributeValues: expressionAttributeValues,
-      ReturnValues: "ALL_NEW",
-    };
-
-    const result = await ddbDocClient.send(new UpdateCommand(params));
-    if (!result.Attributes) return res.status(404).json({ success: false, message: 'User not found' });
-    delete result.Attributes.password;
-    res.json({ success: true, data: result.Attributes });
-  } catch (err) {
-    next(err);
-  }
-}
 
 /**
  * Change Password
@@ -384,69 +240,6 @@ async function disableMfa(req, res, next) {
   }
 }
 
-/**
- * Admin: list users (basic filtering, DynamoDB scan)
- */
-async function listUsers(req, res, next) {
-  try {
-    const { q, department, college, role, isActive } = req.query;
-
-    let filterExpressions = [];
-    let expressionAttributeValues = {};
-    let expressionAttributeNames = {};
-
-    if (q) {
-      filterExpressions.push('contains(#name, :q) OR contains(email, :q) OR contains(facultyID, :q)');
-      expressionAttributeValues[':q'] = q;
-      expressionAttributeNames['#name'] = 'name';
-    }
-
-    if (department) {
-      filterExpressions.push('#department = :department');
-      expressionAttributeValues[':department'] = department;
-      expressionAttributeNames['#department'] = 'department';
-    }
-
-    if (college) {
-      filterExpressions.push('#college = :college');
-      expressionAttributeValues[':college'] = college;
-      expressionAttributeNames['#college'] = 'college';
-    }
-
-    if (role) {
-      filterExpressions.push('#role = :role');
-      expressionAttributeValues[':role'] = role;
-      expressionAttributeNames['#role'] = 'role';
-    }
-
-    if (typeof isActive !== 'undefined') {
-      const activeBool = String(isActive).toLowerCase() === 'true';
-      filterExpressions.push('#isActive = :isActive');
-      expressionAttributeValues[':isActive'] = activeBool;
-      expressionAttributeNames['#isActive'] = 'isActive';
-    }
-
-    const params = {
-      TableName: TABLE_NAME,
-    };
-
-    if (filterExpressions.length > 0) {
-      params.FilterExpression = filterExpressions.join(' AND ');
-      params.ExpressionAttributeValues = expressionAttributeValues;
-      params.ExpressionAttributeNames = expressionAttributeNames;
-    }
-
-    const result = await ddbDocClient.send(new ScanCommand(params));
-    const items = result.Items.map(item => {
-      delete item.password;
-      return item;
-    });
-
-    res.json({ success: true, total: items.length, items });
-  } catch (err) {
-    next(err);
-  }
-}
 
 /**
  * Get Active Sessions
@@ -503,15 +296,10 @@ async function exportUserData(req, res, next) {
 module.exports = {
   getProfile,
   updateProfile,
-  adminCreateUser,
-  adminUpdateUser,
-  listUsers,
-  getUserById,
-  deleteUser,
   changePassword,
   getMfaSetup,
   enableMfa,
   disableMfa,
   getSessions,
-  exportUserData
+  exportUserData,
 };

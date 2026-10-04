@@ -23,7 +23,6 @@ const {
 
 const { authMiddleware, adminOnly, requirePermission, requireSelfOrPermission } = require('../Middleware/authMiddleware');
 const { ensureWhatsappVerified } = require('../Middleware/whatsappMiddleware');
-const apiKeyMiddleware = require('../Middleware/apiKeyMiddleware');
 
 // Configure multer to use memory storage (serverless-safe)
 const upload = multer({
