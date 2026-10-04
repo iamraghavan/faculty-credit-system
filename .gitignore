@@ -17,3 +17,7 @@ coverage/
 
 setup_env.js
 /setup_env.js
+
+# Audit test tooling (local only)
+.dynamodb-local/
+test-results/
