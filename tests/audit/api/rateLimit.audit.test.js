@@ -13,7 +13,7 @@ test('the 201st request from one IP in 15 minutes gets 429', async () => {
   expect(last.status).toBe(429);
 });
 
-test.failing('[BUG] /api/health (the expensive one) is mounted BEFORE the limiter (never limited)', async () => {
+test('[FIXED B-30] /api/health is now behind the rate limiter', async () => {
   let last;
   for (let i = 0; i < 205; i++) last = await api().get('/api/health').set('X-Forwarded-For', '203.0.113.8');
   expect(last.status).toBe(429);

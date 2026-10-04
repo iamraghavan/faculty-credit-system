@@ -73,12 +73,31 @@ describe('health endpoints', () => {
     expect(Object.keys(res.body).sort()).toEqual(['status', 'uptime']);
   });
 
-  test.failing('[BUG] /api/health is public and leaks server internals (hostname, IPs, versions, memory)', async () => {
-    const res = await api().get('/api/health').set('Host', '127.0.0.1:1');
-    expect(res.status).toBe(401);
+  test('[FIXED B-30] /api/health no longer reveals server internals', async () => {
+    const res = await api().get('/api/health');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ status: 'ok' });
+    expect(JSON.stringify(res.body)).not.toMatch(/hostname|localIPs|publicIP|memory|nodeVersion/);
   });
 
-  test('SSRF via /api/health NOT reproducible: on Express 5 its route discovery finds 0 routes', async () => {
+  test('/health/live and /health/ready answer with status only', async () => {
+    expect((await api().get('/health/live')).body).toEqual({ status: 'ok' });
+    const ready = await api().get('/health/ready');
+    expect(ready.status).toBe(200);
+    expect(ready.body).toEqual({ status: 'ok' });
+  });
+
+  test('/health/ready reports 503 when the database does not answer', async () => {
+    const db2 = require('../../../config/db');
+    const client = db2.getDynamoClient();
+    const spy = jest.spyOn(client, 'send').mockRejectedValueOnce(Object.assign(new Error('timeout'), { name: 'TimeoutError' }));
+    const res = await api().get('/health/ready');
+    spy.mockRestore();
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({ status: 'unavailable' });
+  });
+
+  test('SSRF via /api/health is not possible (it no longer calls any other address)', async () => {
     const nock = require('nock');
     const seen = [];
     // "attacker.example.net" is a fake host answered by nock inside this process;

@@ -46,6 +46,12 @@ const expectStatus = (r, s) => { if (r.status !== s) throw new Error(`expected $
       throw new Error('no answer after 30 s');
     });
 
+    await check('Database reachable (/health/ready)', async () => {
+      const r = await fetch(`${BASE}/health/ready`);
+      if (r.status !== 200) throw new Error(`HTTP ${r.status}`);
+      return 'HTTP 200';
+    });
+
     const tokens = {};
     for (const [role, email] of [['admin', 'admin@example.org'], ['oa', 'oa1@example.org'], ['faculty', 'faculty1@example.org']]) {
       await check(`Login as ${role}`, async () => {

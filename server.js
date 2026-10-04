@@ -51,14 +51,14 @@ if (process.env.NODE_ENV !== 'production') {
   app.use(morgan('dev'));
 }
 
-// Health route
-app.use(healthRouter);
-
 // IP Intelligence (Geo-blocking is at Edge, VPN/Datacenter here)
 app.use(ipIntelligenceMiddleware);
 
 // Rate limiting
 app.use(rateLimitMiddleware);
+
+// Health routes: /health/live, /health/ready, /api/health (after the rate limiter)
+app.use(healthRouter);
 
 // Serve static files from 'public' directory
 app.use(express.static('public'));
