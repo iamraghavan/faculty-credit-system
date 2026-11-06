@@ -8,7 +8,10 @@ const { processCredits } = require('../../../utils/calculateCredits');
 
 const { ID } = db;
 let T;
-beforeAll(async () => { await setupApp(); T = await tokens(); });
+beforeAll(async () => {
+  await setupApp();
+  T = await tokens();
+});
 afterAll(() => teardownApp());
 
 const newId = () => crypto.randomBytes(12).toString('hex');
@@ -25,11 +28,20 @@ describe('records are never physically deleted', () => {
     expect((await api().delete(`/api/v1/users/${id}`).set(auth(T.admin))).status).toBe(200);
     const u = await db.get('users', id);
     expect(u).toMatchObject({ isActive: false, deactivatedBy: ID.admin });
-    expect((await api().post('/api/v1/auth/login').send({ email: `del-${id}@example.org`, password: db.PASSWORD })).status).toBe(403);
+    expect(
+      (
+        await api()
+          .post('/api/v1/auth/login')
+          .send({ email: `del-${id}@example.org`, password: db.PASSWORD })
+      ).status,
+    ).toBe(403);
   });
 
   test('credit titles are soft-deleted (isActive=false) and hidden from the admin list', async () => {
-    const created = await api().post('/api/v1/admin/credit-title').set(auth(T.admin)).send({ title: 'Temp title', points: 2, type: 'positive' });
+    const created = await api()
+      .post('/api/v1/admin/credit-title')
+      .set(auth(T.admin))
+      .send({ title: 'Temp title', points: 2, type: 'positive' });
     const id = created.body.data._id;
     await api().delete(`/api/v1/admin/credit-title/${id}`).set(auth(T.admin));
     expect((await db.get('titles', id)).isActive).toBe(false);
@@ -50,32 +62,55 @@ describe('records are never physically deleted', () => {
 });
 
 describe('uniqueness and consistency (DynamoDB has no unique constraints)', () => {
-  test.failing('[BUG] two simultaneous registrations with the same email both succeed (duplicate accounts)', async () => {
-    const body = { name: 'Twin', email: 'twin@example.org', password: 'x'.repeat(12), college: 'Engineering', department: 'CSE' };
-    const res = await Promise.all([1, 2, 3].map(() => api().post('/api/v1/auth/register').set(auth(T.admin)).send(body)));
-    const users = (await db.scan('users')).filter((u) => u.email === 'twin@example.org');
-    expect(res.filter((r) => r.status === 201).length).toBe(1);
-    expect(users.length).toBe(1);
-  });
+  test.failing(
+    '[BUG] two simultaneous registrations with the same email both succeed (duplicate accounts)',
+    async () => {
+      const body = {
+        name: 'Twin',
+        email: 'twin@example.org',
+        password: 'x'.repeat(12),
+        college: 'EGS Pillay Engineering College',
+        department: 'CSE',
+      };
+      const res = await Promise.all(
+        [1, 2, 3].map(() => api().post('/api/v1/auth/register').set(auth(T.admin)).send(body)),
+      );
+      const users = (await db.scan('users')).filter((u) => u.email === 'twin@example.org');
+      expect(res.filter((r) => r.status === 201).length).toBe(1);
+      expect(users.length).toBe(1);
+    },
+  );
 
   test('sequential duplicate email is refused', async () => {
-    const body = { name: 'Solo', email: 'solo@example.org', password: 'x'.repeat(12), college: 'Engineering', department: 'CSE' };
+    const body = {
+      name: 'Solo',
+      email: 'solo@example.org',
+      password: 'x'.repeat(12),
+      college: 'EGS Pillay Engineering College',
+      department: 'CSE',
+    };
     expect((await api().post('/api/v1/auth/register').set(auth(T.admin)).send(body)).status).toBe(201);
     expect((await api().post('/api/v1/auth/register').set(auth(T.admin)).send(body)).status).toBe(400);
   });
 
-  test.failing('[BUG] if recalculation fails after an approval, the API still says success and the stored total is wrong', async () => {
-    const User = require('../../../Models/User');
-    const credit = newId();
-    await db.put('credits', db.credit(credit, ID.faculty2, 'positive', 9, 'pending'));
-    const spy = jest.spyOn(User, 'update').mockRejectedValueOnce(new Error('throttled'));
-    const res = await api().put(`/api/v1/admin/credits/positive/${credit}/status`).set(auth(T.admin)).send({ status: 'approved' });
-    spy.mockRestore();
-    const credits = (await db.scan('credits')).filter((c) => c.faculty === ID.faculty2);
-    const stored = (await db.get('users', ID.faculty2)).currentCredit;
-    const tellsTruth = res.body.balanceUpdated === false;
-    expect(tellsTruth || stored === processCredits(credits).runningTotal).toBe(true);
-  });
+  test.failing(
+    '[BUG] if recalculation fails after an approval, the API still says success and the stored total is wrong',
+    async () => {
+      const User = require('../../../Models/User');
+      const credit = newId();
+      await db.put('credits', db.credit(credit, ID.faculty2, 'positive', 9, 'pending'));
+      const spy = jest.spyOn(User, 'update').mockRejectedValueOnce(new Error('throttled'));
+      const res = await api()
+        .put(`/api/v1/admin/credits/positive/${credit}/status`)
+        .set(auth(T.admin))
+        .send({ status: 'approved' });
+      spy.mockRestore();
+      const credits = (await db.scan('credits')).filter((c) => c.faculty === ID.faculty2);
+      const stored = (await db.get('users', ID.faculty2)).currentCredit;
+      const tellsTruth = res.body.balanceUpdated === false;
+      expect(tellsTruth || stored === processCredits(credits).runningTotal).toBe(true);
+    },
+  );
 
   test('the recalc endpoint repairs a drifted total', async () => {
     await db.put('users', { ...(await db.get('users', ID.faculty2)), currentCredit: 12345 });
@@ -85,7 +120,9 @@ describe('uniqueness and consistency (DynamoDB has no unique constraints)', () =
   });
 
   test('credit snapshot keeps the faculty name at issue time even if the user is renamed', async () => {
-    const res = await api().post('/api/v1/admin/credits/negative').set(auth(T.admin))
+    const res = await api()
+      .post('/api/v1/admin/credits/negative')
+      .set(auth(T.admin))
       .send({ facultyId: ID.faculty2, creditTitleId: db.TITLE.negLate, academicYear: '2025-2026' });
     const before = res.body.data.facultySnapshot.name;
     await db.put('users', { ...(await db.get('users', ID.faculty2)), name: 'Renamed' });

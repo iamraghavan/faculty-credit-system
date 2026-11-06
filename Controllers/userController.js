@@ -1,24 +1,25 @@
 const bcrypt = require('bcryptjs');
-const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
+const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const User = require('../Models/User');
 const { sanitizeUser } = require('../utils/sanitizeUser');
+const { passwordPolicyError } = require('../domain/passwordPolicy');
+const { hashCode, codesMatch } = require('../utils/mfaTicket');
 const Credit = require('../Models/Credit');
 const {
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
   UpdateCommand,
-  ScanCommand,
   QueryCommand,
-} = require("@aws-sdk/lib-dynamodb");
+} = require('@aws-sdk/lib-dynamodb');
 const { handleProfileImageUpload } = require('../utils/uploadProfileImage');
 
-const { 
-  generateTotpSecret, 
-  generateTotpQrCode, 
+const {
+  generateTotpSecret,
+  generateTotpQrCode,
   verifyTotpToken,
   generateMfaCode,
-  sendMfaEmail
+  sendMfaEmail,
 } = require('../utils/mfa');
 const ddbClient = new DynamoDBClient({ region: process.env.AWS_REGION });
 const ddbDocClient = DynamoDBDocumentClient.from(ddbClient);
@@ -41,7 +42,7 @@ async function getProfile(req, res, next) {
     };
 
     const result = await ddbDocClient.send(new GetCommand(params));
-    
+
     // Fallback for users with 'id' as key instead of '_id'
     if (!result.Item) {
       const fallbackParams = {
@@ -55,7 +56,7 @@ async function getProfile(req, res, next) {
     }
 
     if (!result.Item) {
-       return res.status(404).json({ success: false, message: 'User profile not found' });
+      return res.status(404).json({ success: false, message: 'User profile not found' });
     }
 
     res.json({ success: true, data: sanitizeUser(result.Item) });
@@ -64,18 +65,21 @@ async function getProfile(req, res, next) {
   }
 }
 
-
 /**
  * Update current user profile
  */
 async function updateProfile(req, res, next) {
   try {
     const fields = req.fields || req.body || {};
-    const allowedFields = ['name', 'email', 'phone', 'department', 'prefix', 'roleCategory', 'designation', 'whatsappNumber'];
+    const allowedFields = ['name', 'phone', 'prefix', 'whatsappNumber'];
     const updates = {};
 
     for (const field of allowedFields) {
       if (fields[field] !== undefined) updates[field] = fields[field];
+    }
+
+    if (updates.whatsappNumber !== undefined) {
+      updates.whatsappNumber = String(updates.whatsappNumber).trim();
     }
 
     // Validate WhatsApp if updated
@@ -83,27 +87,25 @@ async function updateProfile(req, res, next) {
       return res.status(400).json({ success: false, message: 'WhatsApp number must be exactly 10 digits' });
     }
 
+    // A verification belongs to one phone number; changing it invalidates that proof.
+    if (updates.whatsappNumber !== undefined && updates.whatsappNumber !== (req.user.whatsappNumber || '')) {
+      updates.whatsappVerified = false;
+      updates.whatsappOtp = null;
+      updates.whatsappOtpExpires = null;
+      updates.whatsappOtpAttempts = 0;
+    }
+
     if (req.files?.profileImage) {
       const file = req.files.profileImage;
       updates.profileImage = await handleProfileImageUpload(file);
     }
 
-    // Check if email exists (scan DynamoDB for email)
-    if (updates.email && updates.email !== req.user.email) {
-      const scanParams = {
-        TableName: TABLE_NAME,
-        FilterExpression: 'email = :email',
-        ExpressionAttributeValues: { ':email': updates.email },
-      };
-      const scanResult = await ddbDocClient.send(new ScanCommand(scanParams));
-      if (scanResult.Count > 0) return res.status(400).json({ success: false, message: 'Email already in use' });
-    }
-
     // Build UpdateExpression dynamically
     const updateKeys = Object.keys(updates);
+    if (!updateKeys.length) return res.status(400).json({ success: false, message: 'No profile changes provided' });
     const updateExpression = `SET ${updateKeys.map((k, i) => `#${k} = :${k}`).join(', ')}`;
-    const expressionAttributeNames = Object.fromEntries(updateKeys.map(k => [`#${k}`, k]));
-    const expressionAttributeValues = Object.fromEntries(updateKeys.map(k => [`:${k}`, updates[k]]));
+    const expressionAttributeNames = Object.fromEntries(updateKeys.map((k) => [`#${k}`, k]));
+    const expressionAttributeValues = Object.fromEntries(updateKeys.map((k) => [`:${k}`, updates[k]]));
 
     const params = {
       TableName: TABLE_NAME,
@@ -111,21 +113,16 @@ async function updateProfile(req, res, next) {
       UpdateExpression: updateExpression,
       ExpressionAttributeNames: expressionAttributeNames,
       ExpressionAttributeValues: expressionAttributeValues,
-      ReturnValues: "ALL_NEW",
+      ReturnValues: 'ALL_NEW',
     };
 
     const result = await ddbDocClient.send(new UpdateCommand(params));
-    
-    const attributes = result.Attributes || {};
-    delete attributes.password;
-    delete attributes.mfaSecret;
 
-    res.json({ success: true, data: attributes });
+    res.json({ success: true, data: sanitizeUser(result.Attributes || {}) });
   } catch (err) {
     next(err);
   }
 }
-
 
 /**
  * Change Password
@@ -136,6 +133,8 @@ async function changePassword(req, res, next) {
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ success: false, message: 'Current and new password are required' });
     }
+    const policyError = await passwordPolicyError(newPassword);
+    if (policyError) return res.status(400).json({ success: false, message: policyError });
 
     const userId = req.user._id || req.user.id;
     const user = await User.findById(userId);
@@ -143,8 +142,7 @@ async function changePassword(req, res, next) {
     const isMatch = await bcrypt.compare(currentPassword, user.password);
     if (!isMatch) return res.status(400).json({ success: false, message: 'Current password is incorrect' });
 
-    const salt = await bcrypt.genSalt(10);
-    const hashed = await bcrypt.hash(newPassword, salt);
+    const hashed = await bcrypt.hash(newPassword, 12);
 
     await User.update(userId, { password: hashed, passwordChangedAt: new Date().toISOString() });
 
@@ -162,14 +160,43 @@ async function changePassword(req, res, next) {
  */
 async function getMfaSetup(req, res, next) {
   try {
-    const user = req.user;
+    const user = await User.findById(String(req.user._id || req.user.id));
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (user.mfaEnabled || user.mfaAppEnabled || user.mfaEmailEnabled) {
+      return res
+        .status(409)
+        .json({ success: false, message: 'Disable the current sign-in method before setting up another one' });
+    }
+    const type = req.body?.type || req.query?.type || 'app';
+    if (type === 'email') {
+      const code = generateMfaCode();
+      await User.update(user._id, {
+        mfaPendingEmailCode: hashCode(code),
+        mfaPendingEmailExpiresAt: Date.now() + 5 * 60 * 1000,
+        mfaPendingAttempts: 0,
+      });
+      try {
+        await sendMfaEmail(user, code, 'setup');
+      } catch (error) {
+        return res.status(503).json({
+          success: false,
+          message: 'Could not send the verification email. Please try again later.',
+        });
+      }
+      return res.json({ success: true, message: 'Verification code sent to your email address' });
+    }
+    if (type !== 'app') return res.status(400).json({ success: false, message: 'Invalid MFA type' });
     const secret = generateTotpSecret(user.email);
     const qrCode = await generateTotpQrCode(secret);
+    await User.update(user._id, {
+      mfaPendingSecret: secret.base32,
+      mfaPendingExpiresAt: Date.now() + 10 * 60 * 1000,
+      mfaPendingAttempts: 0,
+    });
 
     res.json({
       success: true,
-      secret: secret.base32,
-      qrCode: qrCode
+      qrCode: qrCode,
     });
   } catch (err) {
     next(err);
@@ -181,26 +208,52 @@ async function getMfaSetup(req, res, next) {
  */
 async function enableMfa(req, res, next) {
   try {
-    const { type, token, secret } = req.body; // type: 'app' or 'email'
+    const { type, token } = req.body || {};
     const userId = req.user._id || req.user.id;
+    const user = await User.findById(String(userId));
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (user.mfaEnabled || user.mfaAppEnabled || user.mfaEmailEnabled) {
+      return res.status(409).json({ success: false, message: 'An MFA method is already active' });
+    }
+    if (!/^\d{6}$/.test(String(token || '')))
+      return res.status(400).json({ success: false, message: 'A 6-digit verification code is required' });
+    if (Number(user.mfaPendingAttempts || 0) >= 5)
+      return res.status(429).json({ success: false, message: 'Too many attempts. Start setup again.' });
 
     if (type === 'app') {
-      if (!token || !secret) return res.status(400).json({ success: false, message: 'Token and Secret are required' });
-      const isValid = verifyTotpToken(secret, token);
-      if (!isValid) return res.status(400).json({ success: false, message: 'Invalid token' });
+      if (!user.mfaPendingSecret || Number(user.mfaPendingExpiresAt) <= Date.now()) {
+        return res.status(400).json({ success: false, message: 'Authenticator setup expired. Start again.' });
+      }
+      if (!verifyTotpToken(user.mfaPendingSecret, String(token))) {
+        await User.update(userId, { mfaPendingAttempts: Number(user.mfaPendingAttempts || 0) + 1 });
+        return res.status(400).json({ success: false, message: 'Invalid authenticator code' });
+      }
 
       await User.update(userId, {
         mfaEnabled: true,
         mfaAppEnabled: true,
-        mfaSecret: secret,
-        mfaEmailEnabled: false
+        mfaSecret: user.mfaPendingSecret,
+        mfaEmailEnabled: false,
+        mfaPendingSecret: null,
+        mfaPendingExpiresAt: null,
+        mfaPendingAttempts: 0,
       });
     } else if (type === 'email') {
+      if (!user.mfaPendingEmailCode || Number(user.mfaPendingEmailExpiresAt) <= Date.now()) {
+        return res.status(400).json({ success: false, message: 'Email verification expired. Start again.' });
+      }
+      if (!codesMatch(user.mfaPendingEmailCode, token)) {
+        await User.update(userId, { mfaPendingAttempts: Number(user.mfaPendingAttempts || 0) + 1 });
+        return res.status(400).json({ success: false, message: 'Invalid email verification code' });
+      }
       await User.update(userId, {
         mfaEnabled: true,
         mfaEmailEnabled: true,
         mfaAppEnabled: false,
-        mfaSecret: null
+        mfaSecret: null,
+        mfaPendingEmailCode: null,
+        mfaPendingEmailExpiresAt: null,
+        mfaPendingAttempts: 0,
       });
     } else {
       return res.status(400).json({ success: false, message: 'Invalid MFA type' });
@@ -217,12 +270,17 @@ async function enableMfa(req, res, next) {
  */
 async function disableMfa(req, res, next) {
   try {
-    const { token } = req.body;
+    const { token, currentPassword } = req.body || {};
     const userId = req.user._id || req.user.id;
     const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (typeof currentPassword !== 'string' || !(await bcrypt.compare(currentPassword, user.password))) {
+      return res.status(403).json({ success: false, message: 'Current password is required to disable MFA' });
+    }
 
     if (user.mfaAppEnabled && user.mfaSecret) {
-      if (!token) return res.status(400).json({ success: false, message: 'Token is required to disable' });
+      if (!/^\d{6}$/.test(String(token || '')))
+        return res.status(400).json({ success: false, message: 'Authenticator code is required to disable MFA' });
       const isValid = verifyTotpToken(user.mfaSecret, token);
       if (!isValid) return res.status(400).json({ success: false, message: 'Invalid token' });
     }
@@ -231,7 +289,12 @@ async function disableMfa(req, res, next) {
       mfaEnabled: false,
       mfaAppEnabled: false,
       mfaEmailEnabled: false,
-      mfaSecret: null
+      mfaSecret: null,
+      mfaPendingSecret: null,
+      mfaPendingExpiresAt: null,
+      mfaPendingEmailCode: null,
+      mfaPendingEmailExpiresAt: null,
+      mfaPendingAttempts: 0,
     });
 
     res.json({ success: true, message: 'MFA disabled successfully' });
@@ -239,7 +302,6 @@ async function disableMfa(req, res, next) {
     next(err);
   }
 }
-
 
 /**
  * Get Active Sessions
@@ -253,7 +315,7 @@ async function getSessions(req, res, next) {
       device: req.headers['user-agent'] || 'Unknown Device',
       ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'Unknown IP',
       lastActive: new Date().toISOString(),
-      isCurrent: true
+      isCurrent: true,
     };
     res.json({ success: true, sessions: [currentSession] });
   } catch (err) {
@@ -268,20 +330,20 @@ async function exportUserData(req, res, next) {
   try {
     const userId = req.user._id || req.user.id;
     const user = await User.findById(userId);
-    
+
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
     const credits = await Credit.find({ faculty: user.facultyID });
-    
+
     let csvData = `--- USER PROFILE ---\n`;
     csvData += `Faculty ID,Name,Email,Department,Designation\n`;
     csvData += `"${user.facultyID || ''}","${user.name || ''}","${user.email || ''}","${user.department || ''}","${user.designation || ''}"\n\n`;
-    
+
     csvData += `--- CREDITS DATA ---\n`;
     csvData += `Type,Title,Points,Status,Academic Year,Date\n`;
-    (credits || []).forEach(c => {
+    (credits || []).forEach((c) => {
       csvData += `"${c.type || ''}","${c.title ? c.title.replace(/"/g, '""') : ''}","${c.points || 0}","${c.status || ''}","${c.academicYear || ''}","${c.createdAt || ''}"\n`;
     });
 

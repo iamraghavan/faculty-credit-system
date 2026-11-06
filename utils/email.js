@@ -16,7 +16,9 @@ const {
  */
 const EMAIL_PASS =
   RAW_EMAIL_PASS && typeof RAW_EMAIL_PASS === 'string'
-    ? RAW_EMAIL_PASS.trim().replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1')
+    ? RAW_EMAIL_PASS.trim()
+        .replace(/^"(.*)"$/, '$1')
+        .replace(/^'(.*)'$/, '$1')
     : RAW_EMAIL_PASS;
 
 if (!EMAIL_HOST || !EMAIL_PORT || !EMAIL_USER || !EMAIL_PASS) {
@@ -28,14 +30,15 @@ if (!EMAIL_HOST || !EMAIL_PORT || !EMAIL_USER || !EMAIL_PASS) {
  */
 function createTransporter() {
   if (!EMAIL_HOST || !EMAIL_PORT || !EMAIL_USER || !EMAIL_PASS) {
-    throw new Error('Email settings are not properly configured. Ensure EMAIL_HOST, EMAIL_PORT, EMAIL_USER and EMAIL_PASS are set.');
+    throw new Error(
+      'Email settings are not properly configured. Ensure EMAIL_HOST, EMAIL_PORT, EMAIL_USER and EMAIL_PASS are set.',
+    );
   }
 
   const port = Number(EMAIL_PORT);
-  const secure =
-    String(EMAIL_SECURE).toLowerCase() === 'true' ? true
-      : String(EMAIL_SECURE).toLowerCase() === 'false' ? false
-        : (port === 465); // auto: 465 => secure:true, otherwise false (STARTTLS)
+  // Standard SMTP ports determine the TLS mode even when an environment value
+  // was copied from another deployment. Port 465 requires TLS immediately.
+  const secure = port === 465 ? true : port === 587 ? false : String(EMAIL_SECURE).toLowerCase() === 'true';
 
   const opts = {
     host: EMAIL_HOST,
@@ -89,7 +92,9 @@ async function sendEmail({ to, subject, text, html, attachments, headers }, retr
       responseCode: verifyErr && verifyErr.responseCode,
       stack: verifyErr && verifyErr.stack,
     });
-    throw new Error(`Failed to verify email transporter: ${verifyErr && verifyErr.message ? verifyErr.message : 'unknown error'}`);
+    throw new Error(
+      `Failed to verify email transporter: ${verifyErr && verifyErr.message ? verifyErr.message : 'unknown error'}`,
+    );
   }
 
   let attempt = 0;
@@ -107,17 +112,26 @@ async function sendEmail({ to, subject, text, html, attachments, headers }, retr
         attachments,
         headers, // Pass custom headers (e.g. List-Unsubscribe)
       });
-      console.log(`Email sent to ${to} (attempt ${attempt})`, info && info.messageId ? `messageId=${info.messageId}` : '');
+      console.log(
+        `Email sent to ${to} (attempt ${attempt})`,
+        info && info.messageId ? `messageId=${info.messageId}` : '',
+      );
       return { sent: true, info };
     } catch (sendErr) {
       lastError = sendErr;
       const code = sendErr && sendErr.code;
-      const isTransient = ['ETIMEDOUT', 'ECONNRESET', 'EPIPE', 'ENOTFOUND', 'ESOCKET'].includes(code) || /timeout|ENOTFOUND|ECONNRESET/i.test(sendErr.message || '');
+      const isTransient =
+        ['ETIMEDOUT', 'ECONNRESET', 'EPIPE', 'ENOTFOUND', 'ESOCKET'].includes(code) ||
+        /timeout|ENOTFOUND|ECONNRESET/i.test(sendErr.message || '');
 
       console.warn(`Email send attempt ${attempt} failed:`, { message: sendErr && sendErr.message, code });
 
       if (!isTransient || attempt > retries) {
-        console.error('Email send failed permanently:', { message: sendErr && sendErr.message, code, stack: sendErr && sendErr.stack });
+        console.error('Email send failed permanently:', {
+          message: sendErr && sendErr.message,
+          code,
+          stack: sendErr && sendErr.stack,
+        });
         throw sendErr;
       }
 

@@ -9,7 +9,10 @@ const { sendEmail } = require('../../../utils/email');
 const { ID } = db;
 let T;
 
-beforeAll(async () => { await setupApp(); T = await tokens(); });
+beforeAll(async () => {
+  await setupApp();
+  T = await tokens();
+});
 afterAll(() => teardownApp());
 
 describe('CDN assets and short links', () => {
@@ -19,7 +22,11 @@ describe('CDN assets and short links', () => {
   });
 
   test('[FIXED SEC-02] an existing proof link cannot be overwritten', async () => {
-    await db.put('shortUrls', { _id: 'abc123', originalUrl: 'https://cdn.jsdelivr.net/gh/x/y@main/real-proof.pdf', visits: 0 });
+    await db.put('shortUrls', {
+      _id: 'abc123',
+      originalUrl: 'https://cdn.jsdelivr.net/gh/x/y@main/real-proof.pdf',
+      visits: 0,
+    });
     await api().post('/api/v1/url/shorten').send({ url: 'https://evil.example.net/phish', alias: 'abc123' });
     const res = await api().get('/s/abc123');
     expect(res.headers.location).toBe('https://cdn.jsdelivr.net/gh/x/y@main/real-proof.pdf');
@@ -32,18 +39,31 @@ describe('CDN assets and short links', () => {
   });
 
   test('logged-in user can shorten a link to this app; other websites are refused', async () => {
-    const ok = await api().post('/api/v1/url/shorten').set(auth(T.faculty)).send({ url: 'http://localhost:9002/u/portal/dashboard' });
+    const ok = await api()
+      .post('/api/v1/url/shorten')
+      .set(auth(T.faculty))
+      .send({ url: 'http://localhost:9002/u/portal/dashboard' });
     expect(ok.status).toBe(200);
     expect(ok.body.shortUrl).toMatch(/\/s\/[0-9a-f]{12}$/);
-    const evil = await api().post('/api/v1/url/shorten').set(auth(T.faculty)).send({ url: 'https://evil.example.net/phish' });
+    const evil = await api()
+      .post('/api/v1/url/shorten')
+      .set(auth(T.faculty))
+      .send({ url: 'https://evil.example.net/phish' });
     expect(evil.status).toBe(400);
     const js = await api().post('/api/v1/url/shorten').set(auth(T.faculty)).send({ url: 'javascript:alert(1)' });
     expect(js.status).toBe(400);
   });
 
   test('a custom alias is ignored, even when logged in', async () => {
-    await db.put('shortUrls', { _id: 'keepme', originalUrl: 'https://cdn.jsdelivr.net/gh/test-owner/test-repo@main/a.pdf', visits: 0 });
-    const res = await api().post('/api/v1/url/shorten').set(auth(T.admin)).send({ url: 'http://localhost:9002/x', alias: 'keepme' });
+    await db.put('shortUrls', {
+      _id: 'keepme',
+      originalUrl: 'https://cdn.jsdelivr.net/gh/test-owner/test-repo@main/a.pdf',
+      visits: 0,
+    });
+    const res = await api()
+      .post('/api/v1/url/shorten')
+      .set(auth(T.admin))
+      .send({ url: 'http://localhost:9002/x', alias: 'keepme' });
     expect(res.body.shortUrl).not.toMatch(/keepme/);
     expect((await db.get('shortUrls', 'keepme')).originalUrl).toMatch(/a\.pdf$/);
   });
@@ -51,7 +71,9 @@ describe('CDN assets and short links', () => {
   test('creating CDN assets is admin-only and limited to own storage', async () => {
     const target = 'https://cdn.jsdelivr.net/gh/test-owner/test-repo@main/x.pdf';
     expect((await api().post('/cdn/assets').set(auth(T.faculty)).send({ targetUrl: target })).status).toBe(403);
-    expect((await api().post('/cdn/assets').set(auth(T.admin)).send({ targetUrl: 'https://evil.example.net/x' })).status).toBe(400);
+    expect(
+      (await api().post('/cdn/assets').set(auth(T.admin)).send({ targetUrl: 'https://evil.example.net/x' })).status,
+    ).toBe(400);
     expect((await api().post('/cdn/assets').set(auth(T.admin)).send({ targetUrl: target })).status).toBe(201);
   });
 
@@ -90,7 +112,9 @@ describe('health endpoints', () => {
   test('/health/ready reports 503 when the database does not answer', async () => {
     const db2 = require('../../../config/db');
     const client = db2.getDynamoClient();
-    const spy = jest.spyOn(client, 'send').mockRejectedValueOnce(Object.assign(new Error('timeout'), { name: 'TimeoutError' }));
+    const spy = jest
+      .spyOn(client, 'send')
+      .mockRejectedValueOnce(Object.assign(new Error('timeout'), { name: 'TimeoutError' }));
     const res = await api().get('/health/ready');
     spy.mockRestore();
     expect(res.status).toBe(503);
@@ -102,11 +126,26 @@ describe('health endpoints', () => {
     const seen = [];
     // "attacker.example.net" is a fake host answered by nock inside this process;
     // no real network traffic happens.
-    const record = (uri) => { seen.push(uri); return 'ok'; };
-    nock('http://attacker.example.net').persist()
-      .get(/.*/).reply(200, record).options(/.*/).reply(200, record).head(/.*/).reply(200)
-      .post(/.*/).reply(200, record).put(/.*/).reply(200, record)
-      .delete(/.*/).reply(200, record).patch(/.*/).reply(200, record);
+    const record = (uri) => {
+      seen.push(uri);
+      return 'ok';
+    };
+    nock('http://attacker.example.net')
+      .persist()
+      .get(/.*/)
+      .reply(200, record)
+      .options(/.*/)
+      .reply(200, record)
+      .head(/.*/)
+      .reply(200)
+      .post(/.*/)
+      .reply(200, record)
+      .put(/.*/)
+      .reply(200, record)
+      .delete(/.*/)
+      .reply(200, record)
+      .patch(/.*/)
+      .reply(200, record);
     nock('https://api.ipify.org').get(/.*/).reply(200, { ip: '0.0.0.0' });
     try {
       await api().get('/api/health').set('Host', 'attacker.example.net');
@@ -120,14 +159,30 @@ describe('health endpoints', () => {
 describe('employment records', () => {
   test.failing('[BUG] updating a faculty employment record fails for the same Date-object reason', async () => {
     const res = await api().put(`/api/v1/users/${ID.faculty1}/employment`).set(auth(T.admin)).send({
-      employeeId: 'E-001', employmentType: 'permanent', status: 'active', college: 'EGSPEC', department: 'CSE',
-      designation: 'Assistant Professor', joiningDate: '2020-06-01', effectiveFrom: '2020-06-01',
+      employeeId: 'E-001',
+      employmentType: 'permanent',
+      status: 'active',
+      college: 'EGSPEC',
+      department: 'CSE',
+      designation: 'Assistant Professor',
+      joiningDate: '2020-06-01',
+      effectiveFrom: '2020-06-01',
     });
     expect(res.status).toBe(200);
   });
   test('professional profile: own update works and rejects javascript: links', async () => {
-    expect((await api().patch('/api/v1/users/me/professional-profile').set(auth(T.faculty)).send({ biography: 'Hello' })).status).toBe(200);
-    expect((await api().patch('/api/v1/users/me/professional-profile').set(auth(T.faculty)).send({ professionalLinks: { website: 'javascript:alert(1)' } })).status).toBe(400);
+    expect(
+      (await api().patch('/api/v1/users/me/professional-profile').set(auth(T.faculty)).send({ biography: 'Hello' }))
+        .status,
+    ).toBe(200);
+    expect(
+      (
+        await api()
+          .patch('/api/v1/users/me/professional-profile')
+          .set(auth(T.faculty))
+          .send({ professionalLinks: { website: 'javascript:alert(1)' } })
+      ).status,
+    ).toBe(400);
   });
 });
 
@@ -139,12 +194,17 @@ describe('notifications', () => {
   });
 
   test('broadcast requires title and body (400)', async () => {
-    expect((await api().post('/api/v1/notifications/broadcast').set(auth(T.admin)).send({ title: 'x' })).status).toBe(400);
+    expect((await api().post('/api/v1/notifications/broadcast').set(auth(T.admin)).send({ title: 'x' })).status).toBe(
+      400,
+    );
   });
 
   test('broadcast escapes HTML in the email body', async () => {
     sendEmail.mockClear();
-    await api().post('/api/v1/notifications/broadcast').set(auth(T.admin)).send({ title: '<b>Hi</b>', body: '<script>x</script>' });
+    await api()
+      .post('/api/v1/notifications/broadcast')
+      .set(auth(T.admin))
+      .send({ title: '<b>Hi</b>', body: '<script>x</script>' });
     const html = sendEmail.mock.calls.map((c) => c[0].html).join('');
     expect(html).not.toContain('<script>');
   });
@@ -197,21 +257,32 @@ describe('reports and exports', () => {
   });
 
   test('official Excel: signed, and the signature verifies publicly', async () => {
-    const res = await api().post('/api/v1/exports/official-excel').set(auth(T.admin))
+    const res = await api()
+      .post('/api/v1/exports/official-excel')
+      .set(auth(T.admin))
       .send({ documentType: 'good_works_submissions', rows: [{ name: 'A', points: 1 }] })
-      .buffer(true).parse((r, cb) => { const d = []; r.on('data', (c) => d.push(c)); r.on('end', () => cb(null, Buffer.concat(d))); });
+      .buffer(true)
+      .parse((r, cb) => {
+        const d = [];
+        r.on('data', (c) => d.push(c));
+        r.on('end', () => cb(null, Buffer.concat(d)));
+      });
     expect(res.status).toBe(200);
     expect(res.headers['x-fcs-document-id']).toMatch(/^FCS-/);
   });
 
   test('official Excel: formula injection is neutralised', async () => {
-    const res = await api().post('/api/v1/exports/official-excel').set(auth(T.admin))
+    const res = await api()
+      .post('/api/v1/exports/official-excel')
+      .set(auth(T.admin))
       .send({ documentType: 'good_works_submissions', rows: [{ name: '=HYPERLINK("http://evil")' }] });
     expect(res.status).toBe(200);
   });
 
   test('[DESIGN] "official" export signs whatever rows the browser sends (not checked against the database)', async () => {
-    const res = await api().post('/api/v1/exports/official-excel').set(auth(T.admin))
+    const res = await api()
+      .post('/api/v1/exports/official-excel')
+      .set(auth(T.admin))
       .send({ documentType: 'good_works_submissions', rows: [{ name: 'Invented Person', points: 99999 }] });
     expect(res.status).toBe(200); // documented as a design finding
   });
@@ -227,46 +298,80 @@ describe('reports and exports', () => {
 
   test('ledger exports (PDF and Excel) are produced', async () => {
     for (const format of ['pdf', 'excel']) {
-      const res = await api().get(`/api/v1/admin/faculty/${ID.faculty1}/credit-ledger/export?format=${format}`).set(auth(T.admin));
+      const res = await api()
+        .get(`/api/v1/admin/faculty/${ID.faculty1}/credit-ledger/export?format=${format}`)
+        .set(auth(T.admin));
       expect(res.status).toBe(200);
     }
   });
 
-  test.failing('[BUG] "export my data" returns no credits (looks them up by facultyID instead of user id)', async () => {
-    const res = await api().get('/api/v1/users/me/export').set(auth(T.faculty));
-    expect(res.status).toBe(200);
-    expect(res.text.split('--- CREDITS DATA ---')[1].trim().split('\n').length).toBeGreaterThan(1);
-  });
+  test.failing(
+    '[BUG] "export my data" returns no credits (looks them up by facultyID instead of user id)',
+    async () => {
+      const res = await api().get('/api/v1/users/me/export').set(auth(T.faculty));
+      expect(res.status).toBe(200);
+      expect(res.text.split('--- CREDITS DATA ---')[1].trim().split('\n').length).toBeGreaterThan(1);
+    },
+  );
 
   test.skip('[BLOCKED by export bug] "export my data" CSV does not neutralise spreadsheet formulas', async () => {
-    await db.put('credits', db.credit('7c00000000000000000000ff', ID.faculty1, 'positive', 1, 'pending', { title: '=cmd|"/c calc"!A1' }));
+    await db.put(
+      'credits',
+      db.credit('7c00000000000000000000ff', ID.faculty1, 'positive', 1, 'pending', { title: '=cmd|"/c calc"!A1' }),
+    );
     const res = await api().get('/api/v1/users/me/export').set(auth(T.faculty));
     expect(res.text).not.toContain('"=cmd');
   });
 });
 
 describe('analytics', () => {
-  test.each(['users', 'credits', 'credit-titles', 'academic-years', 'credit-trends'])('/analytics/%s returns 200', async (p) => {
-    expect((await api().get(`/api/v1/analytics/${p}`).set(auth(T.admin))).status).toBe(200);
-  });
+  test.each(['users', 'credits', 'credit-titles', 'academic-years', 'credit-trends'])(
+    '/analytics/%s returns 200',
+    async (p) => {
+      expect((await api().get(`/api/v1/analytics/${p}`).set(auth(T.admin))).status).toBe(200);
+    },
+  );
 });
 
 describe('credit policies', () => {
   const policy = {
-    name: 'Audit policy', effectiveFrom: '2025-06-01', effectiveTo: null,
-    rules: [{ ruleId: 'paper.journal', name: 'Journal paper', creditType: 'positive', calculation: { basePoints: 10 } }],
+    name: 'Audit policy',
+    effectiveFrom: '2025-06-01',
+    effectiveTo: null,
+    rules: [
+      { ruleId: 'paper.journal', name: 'Journal paper', creditType: 'positive', calculation: { basePoints: 10 } },
+    ],
   };
-  test.failing('[BUG] creating a credit policy always fails (Joi turns dates into Date objects DynamoDB cannot store)', async () => {
-    const created = await api().post('/api/v1/policies').set(auth(T.admin)).send(policy);
-    expect(created.status).toBe(201);
-    const { policyId, version, revision } = created.body.data;
-    const base = `/api/v1/policies/${policyId}/versions/${version}`;
-    expect((await api().put(base).set(auth(T.admin)).send({ ...policy, name: 'Renamed policy', expectedRevision: revision })).status).toBe(200);
-    expect((await api().post(`${base}/preview`).set(auth(T.admin)).send({ ruleId: 'paper.journal', facts: {} })).status).toBe(200);
-    expect((await api().post(`${base}/publish`).set(auth(T.admin))).status).toBe(200);
-    expect((await api().put(base).set(auth(T.admin)).send({ ...policy, expectedRevision: revision + 1 })).status).toBeGreaterThanOrEqual(400);
-    expect((await api().post(`${base}/retire`).set(auth(T.admin))).status).toBe(200);
-  });
+  test.failing(
+    '[BUG] creating a credit policy always fails (Joi turns dates into Date objects DynamoDB cannot store)',
+    async () => {
+      const created = await api().post('/api/v1/policies').set(auth(T.admin)).send(policy);
+      expect(created.status).toBe(201);
+      const { policyId, version, revision } = created.body.data;
+      const base = `/api/v1/policies/${policyId}/versions/${version}`;
+      expect(
+        (
+          await api()
+            .put(base)
+            .set(auth(T.admin))
+            .send({ ...policy, name: 'Renamed policy', expectedRevision: revision })
+        ).status,
+      ).toBe(200);
+      expect(
+        (await api().post(`${base}/preview`).set(auth(T.admin)).send({ ruleId: 'paper.journal', facts: {} })).status,
+      ).toBe(200);
+      expect((await api().post(`${base}/publish`).set(auth(T.admin))).status).toBe(200);
+      expect(
+        (
+          await api()
+            .put(base)
+            .set(auth(T.admin))
+            .send({ ...policy, expectedRevision: revision + 1 })
+        ).status,
+      ).toBeGreaterThanOrEqual(400);
+      expect((await api().post(`${base}/retire`).set(auth(T.admin))).status).toBe(200);
+    },
+  );
   test('invalid policy -> 400', async () => {
     expect((await api().post('/api/v1/policies').set(auth(T.admin)).send({ name: 'x' })).status).toBe(400);
   });
@@ -277,10 +382,18 @@ describe('credit policies', () => {
 });
 
 describe('chat / conversations (MongoDB is never connected)', () => {
-  test.failing('[BUG] listing conversations fails or hangs (feature is broken)', async () => {
-    const res = await api().get('/api/v1/conversations').set(auth(T.faculty)).timeout(15000).catch((e) => ({ status: e.timeout ? 'timeout' : 'error' }));
-    expect(res.status).toBe(200);
-  }, 20000);
+  test.failing(
+    '[BUG] listing conversations fails or hangs (feature is broken)',
+    async () => {
+      const res = await api()
+        .get('/api/v1/conversations')
+        .set(auth(T.faculty))
+        .timeout(15000)
+        .catch((e) => ({ status: e.timeout ? 'timeout' : 'error' }));
+      expect(res.status).toBe(200);
+    },
+    20000,
+  );
 });
 
 describe('error handling and HTTP hardening', () => {
@@ -300,21 +413,30 @@ describe('error handling and HTTP hardening', () => {
     expect(res.body.stack).toBeUndefined();
   });
 
-  test.failing('[BUG] in production, raw internal error messages (e.g. table names) are returned to the user', async () => {
+  test('in production, missing storage does not expose internal table names', async () => {
     const old = process.env.NODE_ENV;
     process.env.NODE_ENV = 'production';
     const Credit = require('../../../Models/Credit');
-    const spy = jest.spyOn(Credit, 'find').mockRejectedValueOnce(Object.assign(new Error('ResourceNotFoundException: table fcs_secret_x'), { name: 'ResourceNotFoundException' }));
+    const spy = jest
+      .spyOn(Credit, 'find')
+      .mockRejectedValueOnce(
+        Object.assign(new Error('ResourceNotFoundException: table fcs_secret_x'), {
+          name: 'ResourceNotFoundException',
+        }),
+      );
     const res = await api().get(`/api/v1/credits/credits/faculty/${ID.faculty1}`).set(auth(T.faculty));
     process.env.NODE_ENV = old;
     spy.mockRestore();
-    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(res.status).toBe(503);
     expect(res.body.stack).toBeUndefined();
+    expect(res.body.message).toBe('Application storage is unavailable. Contact the site administrator.');
     expect(JSON.stringify(res.body)).not.toMatch(/fcs_secret_x/);
   });
 
   test('request body over 10 MB is refused (413)', async () => {
-    const res = await api().post('/api/v1/auth/login').set('Content-Type', 'application/json')
+    const res = await api()
+      .post('/api/v1/auth/login')
+      .set('Content-Type', 'application/json')
       .send(JSON.stringify({ email: 'a@example.org', password: 'x'.repeat(11 * 1024 * 1024) }));
     expect(res.status).toBe(413);
   });
@@ -340,9 +462,13 @@ describe('error handling and HTTP hardening', () => {
   test.failing('[BUG] CORS falls back to "*" (any website) when CORS_ORIGIN is not set', async () => {
     const old = process.env.CORS_ORIGIN;
     delete process.env.CORS_ORIGIN;
-    jest.isolateModules(() => { require('../../../server'); });
+    jest.isolateModules(() => {
+      require('../../../server');
+    });
     let fresh;
-    jest.isolateModules(() => { fresh = require('../../../server'); });
+    jest.isolateModules(() => {
+      fresh = require('../../../server');
+    });
     process.env.CORS_ORIGIN = old;
     const res = await require('supertest')(fresh).get('/health').set('Origin', 'https://evil.example.net');
     expect(res.headers['access-control-allow-origin']).not.toBe('*');

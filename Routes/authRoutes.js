@@ -2,11 +2,17 @@
 const express = require('express');
 const router = express.Router();
 const {
-  refreshToken, logout,
-  getProfile, changePassword,
-  toggleEmailMfa, disableAllMfa,
-  listSessions, revokeSession, revokeAllOtherSessions,
-  sendWhatsappOtp, verifyWhatsappOtp
+  refreshToken,
+  logout,
+  getProfile,
+  changePassword,
+  toggleEmailMfa,
+  disableAllMfa,
+  listSessions,
+  revokeSession,
+  revokeAllOtherSessions,
+  sendWhatsappOtp,
+  verifyWhatsappOtp,
 } = require('../Controllers/authController');
 
 const { register, login } = require('../Controllers/Auth/AuthenticationController');
@@ -14,18 +20,25 @@ const { bulkRegister } = require('../Controllers/Auth/BulkImportController');
 const { forgotPassword, resetPassword } = require('../Controllers/Auth/PasswordController');
 const { enableAppMfa, verifyAppMfaSetup, verifyMfaLogin } = require('../Controllers/Auth/MfaController');
 
-const { authMiddleware, adminOnly } = require('../Middleware/authMiddleware');
+const { authMiddleware, adminOnly, requirePermission } = require('../Middleware/authMiddleware');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 // existing
-router.post('/register', authMiddleware, adminOnly, register);
+router.post('/register', authMiddleware, adminOnly, requirePermission('user.create'), register);
 router.post('/login', login);
 router.get('/refresh', authMiddleware, refreshToken);
 router.post('/logout', authMiddleware, logout);
 
 // NEW: bulk upload
-router.post('/users/bulk-upload', authMiddleware, adminOnly, upload.single('file'), bulkRegister);
+router.post(
+  '/users/bulk-upload',
+  authMiddleware,
+  adminOnly,
+  requirePermission('user.create'),
+  upload.single('file'),
+  bulkRegister,
+);
 
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password/:token', resetPassword);

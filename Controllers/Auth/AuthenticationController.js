@@ -3,10 +3,18 @@ const jwt = require('jsonwebtoken');
 const User = require('../../Models/User');
 const { generateFacultyID, generateApiKey } = require('../../utils/generateID');
 const { verifyTotpToken, generateMfaCode, sendMfaEmail } = require('../../utils/mfa');
-const { issueMfaTicket, hashCode, isLocked, failedAttemptChanges, SUCCESS_CHANGES, LOCK_MINUTES } = require('../../utils/mfaTicket');
+const {
+  issueMfaTicket,
+  hashCode,
+  isLocked,
+  failedAttemptChanges,
+  SUCCESS_CHANGES,
+  LOCK_MINUTES,
+} = require('../../utils/mfaTicket');
 const { schemas } = require('../../utils/validation');
 const Session = require('../../Models/Session');
 const { permissionsFor } = require('../../config/permissions');
+const { getSettings, placement } = require('../../domain/applicationSettings');
 
 async function createLoginSession(user, req) {
   const timeout = Math.max(300000, Number(process.env.SESSION_TIMEOUT) || 3600000);
@@ -35,6 +43,12 @@ async function register(req, res, next) {
 
     const { name, email, password, college, department, role, fcmToken } = value;
     const normalizedEmail = email.trim().toLowerCase();
+    const settings = await getSettings();
+    if (password.length < settings.passwordMinLength)
+      return res
+        .status(400)
+        .json({ success: false, message: `Password must contain at least ${settings.passwordMinLength} characters` });
+    const destination = placement(settings, college, department || '');
 
     // Check Duplicate
     const existingUsers = await User.find({ email: normalizedEmail });
@@ -56,8 +70,7 @@ async function register(req, res, next) {
       name,
       email: normalizedEmail,
       password: hashed,
-      college,
-      department,
+      ...destination,
       facultyID: generateFacultyID(college),
       apiKey: generateApiKey(),
       role: assignedRole,
@@ -80,9 +93,8 @@ async function register(req, res, next) {
         whatsappNumber: newUser.whatsappNumber || null,
         whatsappVerified: newUser.whatsappVerified || false,
         permissions: permissionsFor(newUser),
-      }
+      },
     });
-
   } catch (err) {
     next(err);
   }
@@ -111,7 +123,12 @@ async function login(req, res, next) {
 
     if (user.mfaEnabled && (user.mfaAppEnabled || user.mfaEmailEnabled)) {
       if (isLocked(user)) {
-        return res.status(429).json({ success: false, message: `Too many wrong verification codes. Try again in ${LOCK_MINUTES()} minutes.` });
+        return res
+          .status(429)
+          .json({
+            success: false,
+            message: `Too many wrong verification codes. Try again in ${LOCK_MINUTES()} minutes.`,
+          });
       }
       // The ticket proves the password step passed; verify-mfa requires it (SEC-06).
       const mfaTicket = issueMfaTicket(user);
@@ -123,11 +140,17 @@ async function login(req, res, next) {
         if (!valid) {
           const { locked, changes } = failedAttemptChanges(user);
           await User.update(targetUserId, changes);
-          return res.status(locked ? 429 : 400).json({ success: false, message: locked ? `Too many wrong verification codes. Try again in ${LOCK_MINUTES()} minutes.` : 'Invalid MFA code' });
+          return res
+            .status(locked ? 429 : 400)
+            .json({
+              success: false,
+              message: locked
+                ? `Too many wrong verification codes. Try again in ${LOCK_MINUTES()} minutes.`
+                : 'Invalid MFA code',
+            });
         }
         if (user.mfaFailedAttempts || user.mfaLockedUntil) await User.update(targetUserId, SUCCESS_CHANGES);
-      }
-      else if (user.mfaEmailEnabled) {
+      } else if (user.mfaEmailEnabled) {
         const code = generateMfaCode();
         // Stored as an HMAC, never in plain text (SEC-25).
         await User.update(targetUserId, { mfaCode: hashCode(code), mfaCodeExpires: Date.now() + 300000 });
@@ -142,7 +165,6 @@ async function login(req, res, next) {
     }
 
     res.json(await completeLogin(user, req));
-
   } catch (err) {
     next(err);
   }
@@ -155,11 +177,9 @@ async function login(req, res, next) {
 async function completeLogin(user, req) {
   const userId = user._id || user.id;
   const session = await createLoginSession(user, req);
-  const token = jwt.sign(
-    { id: userId, role: user.role, sessionId: session._id },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
-  );
+  const token = jwt.sign({ id: userId, role: user.role, sessionId: session._id }, process.env.JWT_SECRET, {
+    expiresIn: process.env.JWT_EXPIRES_IN || '1h',
+  });
   return {
     success: true,
     mfaRequired: false,
@@ -176,7 +196,7 @@ async function completeLogin(user, req) {
       token,
       sessionId: session._id,
       sessionExpiresAt: session.expiresAt,
-    }
+    },
   };
 }
 

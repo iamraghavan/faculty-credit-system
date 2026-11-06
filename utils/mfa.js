@@ -8,13 +8,18 @@ function generateMfaCode() {
   return crypto.randomInt(100000, 1000000).toString();
 }
 
-async function sendMfaEmail(user, code) {
+async function sendMfaEmail(user, code, purpose = 'login') {
+  const isSetup = purpose === 'setup';
+  const safeName = String(user.name || 'User').replace(
+    /[&<>"']/g,
+    (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char],
+  );
   const mailOptions = {
     to: user.email,
-    subject: 'CreditWise - Your MFA Verification Code',
-    text: `Hello ${user.name},\n\nYour login verification code is: ${code}\nIt expires in 5 minutes.`,
-    html: `<p>Hello ${user.name},</p>
-           <p>Your login verification code is:</p>
+    subject: isSetup ? 'CreditWise - Confirm email authentication' : 'CreditWise - Your MFA Verification Code',
+    text: `Hello ${user.name},\n\nYour ${isSetup ? 'email authentication setup' : 'login'} verification code is: ${code}\nIt expires in 5 minutes.`,
+    html: `<p>Hello ${safeName},</p>
+           <p>Your ${isSetup ? 'email authentication setup' : 'login'} verification code is:</p>
            <h2>${code}</h2>
            <p>This code expires in 5 minutes.</p>`,
   };

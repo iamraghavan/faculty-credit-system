@@ -104,7 +104,11 @@ Copy `.env.example` to `.env` and fill it in. The server checks settings at star
 | `tests/`                                  | `audit/` (current suite), `setup/`, `helpers/`, `support/testServer.js`                     |
 | `scripts/`                                | Maintenance and test tooling                                                                |
 
-Health checks: `GET /health/live` (process up), `GET /health/ready` (database reachable, 2 s limit).
+Health checks: `GET /health/live` (process up), `GET /health/ready` (users, policies, and notifications storage reachable).
+
+Provision the application settings and notification tables after configuring their table names:
+`node scripts/provision-application-tables.js` previews missing tables, and
+`node scripts/provision-application-tables.js --apply` creates only missing tables with an `_id` string key.
 
 ## 5. Deploy
 

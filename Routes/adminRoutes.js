@@ -14,14 +14,14 @@ const {
   getNegativeAppeals,
   oaGetOwnIssuedCredits,
   listNegativeCreditsForFaculty,
-  adminReopenAppealWindow
+  adminReopenAppealWindow,
 } = require('../Controllers/adminController');
 
 const {
   createCreditTitle,
   listCreditTitles,
   updateCreditTitle,
-  deleteCreditTitle
+  deleteCreditTitle,
 } = require('../Controllers/Admin/CreditTitleController');
 
 const {
@@ -32,28 +32,38 @@ const {
 const {
   issueNegativeCredit,
   issuePositiveCredit,
-  voidPositiveCredit
+  voidPositiveCredit,
 } = require('../Controllers/Admin/CreditManageController');
 
-
-const { authMiddleware, adminOnly, adminOrOA, requirePermission, requireSelfOrPermission } = require('../Middleware/authMiddleware');
+const {
+  authMiddleware,
+  adminOnly,
+  adminOrOA,
+  requirePermission,
+  requireSelfOrPermission,
+} = require('../Middleware/authMiddleware');
 const { updateOwnIssuedCredit, voidOwnIssuedCredit } = require('../Controllers/oaCreditController');
-const { getFacultyLedger, exportFacultyLedger, getFacultyRanking, exportFacultyRanking } = require('../Controllers/facultyLedgerController');
+const { requireOpenAcademicYear } = require('../Middleware/academicYearMiddleware');
+const {
+  getFacultyLedger,
+  exportFacultyLedger,
+  getFacultyRanking,
+  exportFacultyRanking,
+} = require('../Controllers/facultyLedgerController');
 
 // Configure multer to use memory storage (serverless-safe)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (req, file, cb) => {
-    const allowed = (process.env.ASSET_ALLOWED_EXT ||
-      'pdf,png,jpg,jpeg,webp,gif,svg,txt,csv,json,doc,docx,xls,xlsx,zip,mp4,webm'
+    const allowed = (
+      process.env.ASSET_ALLOWED_EXT || 'pdf,png,jpg,jpeg,webp,gif,svg,txt,csv,json,doc,docx,xls,xlsx,zip,mp4,webm'
     ).split(',');
     const ext = file.originalname.split('.').pop().toLowerCase();
     if (!allowed.includes(ext)) return cb(new Error('File type not allowed'), false);
     cb(null, true);
-  }
+  },
 });
-
 
 /**
  * Credit Titles
@@ -69,18 +79,37 @@ router.delete('/credit-title/:id', authMiddleware, adminOnly, deleteCreditTitle)
 router.get('/credits/positive', authMiddleware, adminOnly, listPositiveCreditsForAdmin);
 router.get('/credits/positive/:id', authMiddleware, adminOnly, getPositiveCreditById);
 router.put('/credits/positive/:id/status', authMiddleware, adminOnly, updatePositiveCreditStatus);
-router.post('/credits/positive', authMiddleware, adminOrOA, upload.single('proof'), issuePositiveCredit);
+router.post(
+  '/credits/positive',
+  authMiddleware,
+  adminOrOA,
+  upload.single('proof'),
+  requireOpenAcademicYear,
+  issuePositiveCredit,
+);
 router.delete('/credits/positive/:id', authMiddleware, adminOnly, voidPositiveCredit);
 
 /**
  * Negative credits issued by admin to faculty
  */
-router.post('/credits/negative', authMiddleware, adminOrOA, upload.single('proof'), issueNegativeCredit);
+router.post(
+  '/credits/negative',
+  authMiddleware,
+  adminOrOA,
+  upload.single('proof'),
+  requireOpenAcademicYear,
+  issueNegativeCredit,
+);
 
 /**
  * Faculty negative credits endpoint (frontend-friendly)
  */
-router.get('/faculty/:facultyId/credits/negative', authMiddleware, requireSelfOrPermission('facultyId', 'credit.read:any'), listNegativeCreditsForFaculty);
+router.get(
+  '/faculty/:facultyId/credits/negative',
+  authMiddleware,
+  requireSelfOrPermission('facultyId', 'credit.read:any'),
+  listNegativeCreditsForFaculty,
+);
 
 // GET /api/v1/admin/credits/negative
 router.get('/credits/negative', authMiddleware, adminOnly, adminListNegativeCredits);
@@ -92,10 +121,7 @@ router.get('/credits/negative/:id', authMiddleware, adminOnly, adminGetNegativeC
 // GET /api/v1/admin/credits/negative/:id/faculty
 router.get('/credits/negative/:id/faculty', authMiddleware, adminOnly, adminGetFacultyByNegativeCreditId);
 
-
-
 router.get('/credits/negative/appeals/all', authMiddleware, adminOnly, getNegativeAppeals);
-
 
 // Get appeal details by creditId
 router.get('/credits/negative/:creditId/appeal', authMiddleware, adminOnly, adminGetAppealByCreditId);
@@ -104,19 +130,35 @@ router.get('/credits/negative/:creditId/appeal', authMiddleware, adminOnly, admi
 router.put('/credits/negative/:creditId/appeal', authMiddleware, adminOnly, adminUpdateAppealStatus);
 
 // Admin/OA: Re-open appeal window for a specific credit
-router.patch(['/credits/negative/:creditId/reopen', '/credits/credits/negative/:creditId/reopen'], authMiddleware, adminOrOA, adminReopenAppealWindow);
+router.patch(
+  ['/credits/negative/:creditId/reopen', '/credits/credits/negative/:creditId/reopen'],
+  authMiddleware,
+  adminOrOA,
+  adminReopenAppealWindow,
+);
 
 // OA-only endpoint: get credits issued by the logged-in OA
 router.get('/oa/credits/issued', authMiddleware, requirePermission('credit.read:own-issued'), oaGetOwnIssuedCredits);
 
-router.patch('/oa/credits/issued/:id', authMiddleware, requirePermission('credit.edit:own-issued'), upload.single('proof'), updateOwnIssuedCredit);
-router.delete('/oa/credits/issued/:id', authMiddleware, requirePermission('credit.void:own-issued'), voidOwnIssuedCredit);
+router.patch(
+  '/oa/credits/issued/:id',
+  authMiddleware,
+  requirePermission('credit.edit:own-issued'),
+  upload.single('proof'),
+  requireOpenAcademicYear,
+  updateOwnIssuedCredit,
+);
+router.delete(
+  '/oa/credits/issued/:id',
+  authMiddleware,
+  requirePermission('credit.void:own-issued'),
+  voidOwnIssuedCredit,
+);
 
 // Admin: individual faculty credit ledger and professional-detail exports
 router.get('/faculty/:facultyId/credit-ledger', authMiddleware, adminOnly, getFacultyLedger);
 router.get('/faculty/:facultyId/credit-ledger/export', authMiddleware, adminOnly, exportFacultyLedger);
 router.get('/faculty-ledger/ranking', authMiddleware, adminOnly, getFacultyRanking);
 router.get('/faculty-ledger/ranking/export', authMiddleware, adminOnly, exportFacultyRanking);
-
 
 module.exports = router;

@@ -10,7 +10,10 @@ const { ID, TITLE, CREDIT } = db;
 const ROLES = ['anonymous', 'faculty', 'oa', 'admin', 'superadmin'];
 let T;
 
-beforeAll(async () => { await setupApp(); T = await tokens(); });
+beforeAll(async () => {
+  await setupApp();
+  T = await tokens();
+});
 afterAll(() => teardownApp());
 
 const ALL = ['faculty', 'oa', 'admin', 'superadmin'];
@@ -98,20 +101,41 @@ test.each(cases)('%s %s %s -> allowed=%s', async (role, method, path, allowed, b
 });
 
 describe('specific escalation attempts', () => {
-  test.failing('[BUG] JSON body to POST/PUT /users never gets a response (request hangs until timeout)', async () => {
-    const res = await api().put(`/api/v1/users/${ID.faculty2}`).set(auth(T.admin)).send({ name: 'x' })
-      .timeout(5000).catch((e) => ({ status: e.timeout ? 'timeout' : e.status }));
-    expect(res.status).not.toBe('timeout');
-  }, 15000);
+  test.failing(
+    '[BUG] JSON body to POST/PUT /users never gets a response (request hangs until timeout)',
+    async () => {
+      const res = await api()
+        .put(`/api/v1/users/${ID.faculty2}`)
+        .set(auth(T.admin))
+        .send({ name: 'x' })
+        .timeout(5000)
+        .catch((e) => ({ status: e.timeout ? 'timeout' : e.status }));
+      expect(res.status).not.toBe('timeout');
+    },
+    15000,
+  );
 
-  test.failing('[BUG] superadmin is refused on /admin/faculty/:id/credits/negative (controller checks role names)', async () => {
-    expect((await api().get(`/api/v1/admin/faculty/${ID.faculty2}/credits/negative`).set(auth(T.superadmin))).status).toBe(200);
-  });
+  test.failing(
+    '[BUG] superadmin is refused on /admin/faculty/:id/credits/negative (controller checks role names)',
+    async () => {
+      expect(
+        (await api().get(`/api/v1/admin/faculty/${ID.faculty2}/credits/negative`).set(auth(T.superadmin))).status,
+      ).toBe(200);
+    },
+  );
 
   test('[DESIGN] any admin can create another ADMIN through /auth/register (no superadmin approval)', async () => {
     // Documented: any admin can mint more admins; no superadmin approval. Business decision.
-    const res = await api().post('/api/v1/auth/register').set(auth(T.admin))
-      .send({ name: 'Second Admin', email: 'admin2@example.org', password: 'x'.repeat(12), college: 'C', role: 'admin' });
+    const res = await api()
+      .post('/api/v1/auth/register')
+      .set(auth(T.admin))
+      .send({
+        name: 'Second Admin',
+        email: 'admin2@example.org',
+        password: 'x'.repeat(12),
+        college: 'EGS Pillay Engineering College',
+        role: 'admin',
+      });
     expect(res.status).toBe(201);
     expect(res.body.data.role).toBe('admin');
   });
@@ -122,7 +146,9 @@ describe('specific escalation attempts', () => {
   });
 
   test('admin cannot edit or deactivate the superadmin', async () => {
-    expect((await api().put(`/api/v1/users/${ID.superadmin}`).set(auth(T.admin)).field('name', 'pwned')).status).toBe(403);
+    expect((await api().put(`/api/v1/users/${ID.superadmin}`).set(auth(T.admin)).field('name', 'pwned')).status).toBe(
+      403,
+    );
     expect((await api().delete(`/api/v1/users/${ID.superadmin}`).set(auth(T.admin))).status).toBe(403);
   });
 
@@ -132,9 +158,14 @@ describe('specific escalation attempts', () => {
   });
 
   test('faculty profile update cannot change role, isActive or credits (mass assignment)', async () => {
-    const res = await api().put('/api/v1/users/me').set(auth(T.faculty))
-      .field('name', 'Faculty One').field('role', 'admin').field('isActive', 'false')
-      .field('currentCredit', '9999').field('permissionOverrides', 'credit.review');
+    const res = await api()
+      .put('/api/v1/users/me')
+      .set(auth(T.faculty))
+      .field('name', 'Faculty One')
+      .field('role', 'admin')
+      .field('isActive', 'false')
+      .field('currentCredit', '9999')
+      .field('permissionOverrides', 'credit.review');
     expect(res.status).toBe(200);
     const u = await db.get('users', ID.faculty1);
     expect(u).toMatchObject({ role: 'faculty', isActive: true });
@@ -142,19 +173,26 @@ describe('specific escalation attempts', () => {
     expect(u.permissionOverrides).toBeUndefined();
   });
 
-  test.failing('[BUG] faculty can change their own department via /users/me (affects reports/rankings)', async () => {
+  test('[FIXED] faculty cannot change their own department via /users/me', async () => {
     await api().put('/api/v1/users/me').set(auth(T.faculty2)).field('department', 'MBA');
     expect((await db.get('users', ID.faculty2)).department).toBe('CSE');
   });
 
-  test.failing('[BUG] faculty can change own email to any address without verification', async () => {
+  test('faculty cannot change their email or employment fields through the self profile endpoint', async () => {
     const res = await api().put('/api/v1/users/me').set(auth(T.faculty2)).field('email', 'someone-else@example.org');
     const changed = (await db.get('users', ID.faculty2)).email === 'someone-else@example.org';
     if (changed) await db.put('users', { ...(await db.get('users', ID.faculty2)), email: 'faculty2@example.org' });
     expect(res.status === 200 && changed).toBe(false);
+    await api()
+      .put('/api/v1/users/me')
+      .set(auth(T.faculty2))
+      .field('designation', 'Professor')
+      .field('roleCategory', 'Senior');
+    expect((await db.get('users', ID.faculty2)).designation).not.toBe('Professor');
+    expect((await db.get('users', ID.faculty2)).roleCategory).not.toBe('Senior');
   });
 
-  test("OA user directory exposes only faculty, with limited fields", async () => {
+  test('OA user directory exposes only faculty, with limited fields', async () => {
     const res = await api().get('/api/v1/users').set(auth(T.oa));
     expect(res.status).toBe(200);
     expect(res.body.items.every((u) => u.role === 'faculty')).toBe(true);
@@ -168,7 +206,29 @@ describe('specific escalation attempts', () => {
     expect(text).not.toMatch(/mfaSecret|apiKey|resetPasswordToken/);
   });
 
-  test.failing('[BUG] OA global search returns ALL credits of ALL faculty (not just own-issued)', async () => {
+  test('changing a WhatsApp number clears verification and profile updates hide secrets', async () => {
+    const before = await db.get('users', ID.faculty2);
+    await db.put('users', {
+      ...before,
+      whatsappNumber: '9876543210',
+      whatsappVerified: true,
+      whatsappOtp: '123456',
+      whatsappOtpExpires: Date.now() + 60000,
+    });
+    try {
+      const res = await api().put('/api/v1/users/me').set(auth(T.faculty2)).field('whatsappNumber', '9876543211');
+      expect(res.status).toBe(200);
+      expect(res.body.data).not.toHaveProperty('whatsappOtp');
+      expect(res.body.data).not.toHaveProperty('apiKey');
+      const after = await db.get('users', ID.faculty2);
+      expect(after.whatsappVerified).toBe(false);
+      expect(after.whatsappOtp).toBeNull();
+    } finally {
+      await db.put('users', before);
+    }
+  });
+
+  test('OA global search returns only credits they issued', async () => {
     const res = await api().get('/api/v1/search?q=credit').set(auth(T.oa));
     const neg = res.body.results.find((r) => r.category === 'Negative Credits');
     const pos = res.body.results.find((r) => r.category === 'Positive Credits');
@@ -184,10 +244,24 @@ describe('specific escalation attempts', () => {
     expect(ids.every((id) => own.has(id))).toBe(true);
   });
 
-  test.failing("[BUG] any user can hijack another user's push subscription (endpoint is the table key)", async () => {
-    const endpoint = 'https://push.example.org/sub/victim';
-    await api().post('/api/v1/notifications/subscribe').set(auth(T.faculty2)).send({ endpoint, keys: { p256dh: 'a', auth: 'b' } });
-    await api().post('/api/v1/notifications/subscribe').set(auth(T.faculty)).send({ endpoint, keys: { p256dh: 'a', auth: 'b' } });
+  test('another user cannot claim a registered push endpoint', async () => {
+    const endpoint = 'https://fcm.googleapis.com/fcm/send/victim';
+    expect(
+      (
+        await api()
+          .post('/api/v1/notifications/subscribe')
+          .set(auth(T.faculty2))
+          .send({ endpoint, keys: { p256dh: 'a', auth: 'b' } })
+      ).status,
+    ).toBe(201);
+    expect(
+      (
+        await api()
+          .post('/api/v1/notifications/subscribe')
+          .set(auth(T.faculty))
+          .send({ endpoint, keys: { p256dh: 'a', auth: 'b' } })
+      ).status,
+    ).toBe(409);
     expect((await db.get('pushSubs', endpoint, 'endpoint')).userId).toBe(ID.faculty2);
   });
 

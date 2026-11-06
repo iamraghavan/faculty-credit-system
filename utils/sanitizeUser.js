@@ -1,7 +1,22 @@
 const PRIVATE_FIELDS = new Set([
-  'password', 'apiKey', 'mfaSecret', 'mfaCode', 'mfaCodeExpires',
-  'whatsappOtp', 'whatsappOtpExpires', 'resetPasswordToken', 'resetPasswordExpires',
-  'fcmToken', 'passwordResetToken', 'passwordResetExpires',
+  'password',
+  'apiKey',
+  'mfaSecret',
+  'mfaPendingSecret',
+  'mfaPendingExpiresAt',
+  'mfaPendingEmailCode',
+  'mfaPendingEmailExpiresAt',
+  'mfaPendingAttempts',
+  'mfaCode',
+  'mfaCodeExpires',
+  'whatsappOtp',
+  'whatsappOtpExpires',
+  'whatsappOtpAttempts',
+  'resetPasswordToken',
+  'resetPasswordExpires',
+  'fcmToken',
+  'passwordResetToken',
+  'passwordResetExpires',
 ]);
 
 function sanitizeUser(user) {

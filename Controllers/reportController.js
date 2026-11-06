@@ -11,7 +11,18 @@ const { createExportVerification } = require('../utils/exportVerification');
  */
 async function getReportData(req, res, next) {
   try {
-    const { level, id, academicYear, startDate, endDate, type, status, view = 'transactions', sortBy = 'total', order = 'desc' } = req.query;
+    const {
+      level,
+      id,
+      academicYear,
+      startDate,
+      endDate,
+      type,
+      status,
+      view = 'transactions',
+      sortBy = 'total',
+      order = 'desc',
+    } = req.query;
 
     let filter = {};
     if (academicYear && academicYear !== 'all') filter.academicYear = academicYear;
@@ -22,14 +33,14 @@ async function getReportData(req, res, next) {
 
     // Apply Level Filtering
     if (level === 'department' && id) {
-      credits = credits.filter(c => c.facultySnapshot?.department === id);
+      credits = credits.filter((c) => c.facultySnapshot?.department === id);
     } else if (level === 'faculty' && id) {
-      credits = credits.filter(c => c.faculty === id);
+      credits = credits.filter((c) => c.faculty === id);
     }
 
     // Date filtering
     if (startDate || endDate) {
-      credits = credits.filter(c => {
+      credits = credits.filter((c) => {
         const d = new Date(c.createdAt);
         if (startDate && d < new Date(startDate)) return false;
         if (endDate && d > new Date(endDate)) return false;
@@ -40,7 +51,7 @@ async function getReportData(req, res, next) {
     if (view === 'ranking') {
       // Aggregate by faculty
       const facultyMap = {};
-      credits.forEach(c => {
+      credits.forEach((c) => {
         const fId = c.faculty;
         if (!facultyMap[fId]) {
           facultyMap[fId] = {
@@ -52,13 +63,13 @@ async function getReportData(req, res, next) {
             positive: 0,
             negative: 0,
             total: 0,
-            count: 0
+            count: 0,
           };
         }
         const pts = Number(c.points) || 0;
         if (c.type === 'positive') facultyMap[fId].positive += pts;
         else if (c.type === 'negative') facultyMap[fId].negative += Math.abs(pts);
-        
+
         facultyMap[fId].total += pts;
         facultyMap[fId].count += 1;
       });
@@ -76,7 +87,7 @@ async function getReportData(req, res, next) {
         success: true,
         count: ranking.length,
         view: 'ranking',
-        data: ranking
+        data: ranking,
       });
     }
 
@@ -85,7 +96,7 @@ async function getReportData(req, res, next) {
       success: true,
       count: credits.length,
       view: 'transactions',
-      data: credits
+      data: credits,
     });
   } catch (err) {
     next(err);
@@ -100,7 +111,18 @@ async function getReportData(req, res, next) {
 // (never the login secret), so it can never be used to log in.
 // ---------------------------------------------------------------------------
 const SHARE_PURPOSE = 'report-share';
-const REPORT_QUERY_KEYS = ['level', 'id', 'academicYear', 'startDate', 'endDate', 'type', 'status', 'view', 'sortBy', 'order'];
+const REPORT_QUERY_KEYS = [
+  'level',
+  'id',
+  'academicYear',
+  'startDate',
+  'endDate',
+  'type',
+  'status',
+  'view',
+  'sortBy',
+  'order',
+];
 
 function shareSecret() {
   const secret = process.env.EXPORT_SIGNING_SECRET;
@@ -113,15 +135,16 @@ function shareSecret() {
 }
 
 function pickReportQuery(query) {
-  return Object.fromEntries(REPORT_QUERY_KEYS.filter((k) => query[k] !== undefined && query[k] !== '').map((k) => [k, String(query[k])]));
+  return Object.fromEntries(
+    REPORT_QUERY_KEYS.filter((k) => query[k] !== undefined && query[k] !== '').map((k) => [k, String(query[k])]),
+  );
 }
 
 function createSharePass(query, user, hours) {
-  return jwt.sign(
-    { purpose: SHARE_PURPOSE, q: pickReportQuery(query), by: String(user?._id || '') },
-    shareSecret(),
-    { expiresIn: `${hours}h`, algorithm: 'HS256' },
-  );
+  return jwt.sign({ purpose: SHARE_PURPOSE, q: pickReportQuery(query), by: String(user?._id || '') }, shareSecret(), {
+    expiresIn: `${hours}h`,
+    algorithm: 'HS256',
+  });
 }
 
 function readSharePass(pass) {
@@ -182,7 +205,19 @@ async function downloadSharedReport(req, res, next) {
 
 async function sendReport(req, res, query, generatedBy, buttonPass) {
   {
-    const { level, id, format, academicYear, startDate, endDate, type, status, view = 'transactions', sortBy = 'total', order = 'desc' } = query;
+    const {
+      level,
+      id,
+      format,
+      academicYear,
+      startDate,
+      endDate,
+      type,
+      status,
+      view = 'transactions',
+      sortBy = 'total',
+      order = 'desc',
+    } = query;
 
     // Reuse filter logic
     let filter = {};
@@ -193,13 +228,13 @@ async function sendReport(req, res, query, generatedBy, buttonPass) {
     let data = await Credit.find(filter);
 
     if (level === 'department' && id) {
-      data = data.filter(c => c.facultySnapshot?.department === id);
+      data = data.filter((c) => c.facultySnapshot?.department === id);
     } else if (level === 'faculty' && id) {
-      data = data.filter(c => c.faculty === id);
+      data = data.filter((c) => c.faculty === id);
     }
 
     if (startDate || endDate) {
-      data = data.filter(c => {
+      data = data.filter((c) => {
         const d = new Date(c.createdAt);
         if (startDate && d < new Date(startDate)) return false;
         if (endDate && d > new Date(endDate)) return false;
@@ -209,7 +244,7 @@ async function sendReport(req, res, query, generatedBy, buttonPass) {
 
     if (view === 'ranking') {
       const facultyMap = {};
-      data.forEach(c => {
+      data.forEach((c) => {
         const fId = c.faculty;
         if (!facultyMap[fId]) {
           facultyMap[fId] = {
@@ -221,7 +256,7 @@ async function sendReport(req, res, query, generatedBy, buttonPass) {
             positive: 0,
             negative: 0,
             total: 0,
-            count: 0
+            count: 0,
           };
         }
         const pts = Number(c.points) || 0;
@@ -246,32 +281,40 @@ async function sendReport(req, res, query, generatedBy, buttonPass) {
       level: level || 'College',
       title: `${(level || 'College').toUpperCase()} Credit Report ${id ? `- ${id}` : ''}`,
       date: new Date().toLocaleString(),
-      generatedBy: generatedBy || 'Administrative System'
+      generatedBy: generatedBy || 'Administrative System',
     };
 
-    const verificationTotals = view === 'ranking'
-      ? {
-          faculty: data.length,
-          positive: data.reduce((sum, item) => sum + (Number(item.positive) || 0), 0),
-          negative: data.reduce((sum, item) => sum + (Number(item.negative) || 0), 0),
-          net: data.reduce((sum, item) => sum + (Number(item.total) || 0), 0),
-        }
-      : {
-          records: data.length,
-          positive: data.filter(item => item.type === 'positive').reduce((sum, item) => sum + Math.abs(Number(item.points) || 0), 0),
-          negative: data.filter(item => item.type === 'negative').reduce((sum, item) => sum + Math.abs(Number(item.points) || 0), 0),
-        };
+    const verificationTotals =
+      view === 'ranking'
+        ? {
+            faculty: data.length,
+            positive: data.reduce((sum, item) => sum + (Number(item.positive) || 0), 0),
+            negative: data.reduce((sum, item) => sum + (Number(item.negative) || 0), 0),
+            net: data.reduce((sum, item) => sum + (Number(item.total) || 0), 0),
+          }
+        : {
+            records: data.length,
+            positive: data
+              .filter((item) => item.type === 'positive')
+              .reduce((sum, item) => sum + Math.abs(Number(item.points) || 0), 0),
+            negative: data
+              .filter((item) => item.type === 'negative')
+              .reduce((sum, item) => sum + Math.abs(Number(item.points) || 0), 0),
+          };
 
     let buffer;
     let contentType;
-    let ext = format === 'excel' ? 'xlsx' : (format === 'html' ? 'html' : 'pdf');
+    let ext = format === 'excel' ? 'xlsx' : format === 'html' ? 'html' : 'pdf';
 
-    const verification = format === 'html' ? null : await createExportVerification({
-      documentType: view === 'ranking' ? 'faculty_credit_ranking_report' : 'faculty_credit_transaction_report',
-      subject: { scope: metadata.level, scopeId: id || null },
-      totals: verificationTotals,
-      content: { data, metadata, view },
-    });
+    const verification =
+      format === 'html'
+        ? null
+        : await createExportVerification({
+            documentType: view === 'ranking' ? 'faculty_credit_ranking_report' : 'faculty_credit_transaction_report',
+            subject: { scope: metadata.level, scopeId: id || null },
+            totals: verificationTotals,
+            content: { data, metadata, view },
+          });
 
     if (format === 'excel') {
       buffer = await createExcelReport(data, metadata, view, verification);
@@ -282,7 +325,13 @@ async function sendReport(req, res, query, generatedBy, buttonPass) {
       const excelUrl = buttonPass ? sharedReportUrl(req, buttonPass, 'excel') : '#';
 
       const html = createHtmlReport(data, metadata, { pdf: pdfUrl, excel: excelUrl }, view);
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader(
+        'Content-Security-Policy',
+        "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      );
       res.setHeader('Referrer-Policy', 'no-referrer');
+      res.setHeader('Cache-Control', 'no-store');
       return res.send(html);
     } else {
       buffer = await createPdfReport(data, metadata, view, verification);

@@ -16,7 +16,9 @@ afterAll(() => teardownApp());
 
 describe('POST /auth/login', () => {
   test.each(['superadmin', 'admin', 'oa1', 'faculty1'])('%s can log in and gets a session-bound token', async (who) => {
-    const res = await api().post(LOGIN).send({ email: `${who}@example.org`, password: PASSWORD });
+    const res = await api()
+      .post(LOGIN)
+      .send({ email: `${who}@example.org`, password: PASSWORD });
     expect(res.status).toBe(200);
     expect(res.body.data.token).toBeTruthy();
     const decoded = jwt.verify(res.body.data.token, process.env.JWT_SECRET);
@@ -45,12 +47,20 @@ describe('POST /auth/login', () => {
   test('missing / wrong-type fields -> 400', async () => {
     expect((await api().post(LOGIN).send({})).status).toBe(400);
     expect((await api().post(LOGIN).send({ email: 'faculty1@example.org' })).status).toBe(400);
-    expect((await api().post(LOGIN).send({ email: ['a'], password: 1 })).status).toBe(400);
+    expect(
+      (
+        await api()
+          .post(LOGIN)
+          .send({ email: ['a'], password: 1 })
+      ).status,
+    ).toBe(400);
     expect((await api().post(LOGIN).send({ email: 'not-an-email', password: 'x' })).status).toBe(400);
   });
 
   test('NoSQL-style operator objects are rejected', async () => {
-    const res = await api().post(LOGIN).send({ email: { $ne: null }, password: { $ne: null } });
+    const res = await api()
+      .post(LOGIN)
+      .send({ email: { $ne: null }, password: { $ne: null } });
     expect(res.status).toBe(400);
   });
 
@@ -66,7 +76,9 @@ describe('POST /auth/login', () => {
 
   test.failing('[BUG] no account lockout: 25 wrong passwords, then the right one still works immediately', async () => {
     for (let i = 0; i < 25; i++) {
-      await api().post(LOGIN).send({ email: 'faculty2@example.org', password: `guess-${i}` });
+      await api()
+        .post(LOGIN)
+        .send({ email: 'faculty2@example.org', password: `guess-${i}` });
     }
     const res = await api().post(LOGIN).send({ email: 'faculty2@example.org', password: PASSWORD });
     expect(res.status).toBe(429); // expected: temporarily locked / throttled per account
@@ -106,7 +118,8 @@ describe('MFA', () => {
     const code = mail.text.match(/\b(\d{6})\b/)[1];
     return { ticket: res.body.mfaTicket, code };
   }
-  const resetMfaUser = async () => db.put('users', { ...(await db.get('users', ID.mfaEmail)), mfaFailedAttempts: 0, mfaLockedUntil: null });
+  const resetMfaUser = async () =>
+    db.put('users', { ...(await db.get('users', ID.mfaEmail)), mfaFailedAttempts: 0, mfaLockedUntil: null });
 
   test('email MFA: code is emailed and verify-mfa (with ticket) returns a session-bound token', async () => {
     await resetMfaUser();
@@ -150,7 +163,9 @@ describe('MFA', () => {
   test('[FIXED SEC-06] verify-mfa no longer accepts a userId (or email) instead of the password step', async () => {
     const totp = speakeasy.totp({ secret: db.MFA_SECRET, encoding: 'base32' });
     expect((await api().post('/api/v1/auth/verify-mfa').send({ userId: ID.mfaApp, code: totp })).status).toBe(401);
-    expect((await api().post('/api/v1/auth/verify-mfa').send({ email: 'mfa-app@example.org', code: totp })).status).toBe(401);
+    expect(
+      (await api().post('/api/v1/auth/verify-mfa').send({ email: 'mfa-app@example.org', code: totp })).status,
+    ).toBe(401);
   });
 
   test('verify-mfa: forged, expired or login tokens are not accepted as tickets', async () => {
@@ -166,7 +181,9 @@ describe('MFA', () => {
   test('app MFA: ticket + valid TOTP logs in', async () => {
     const step = await api().post(LOGIN).send({ email: 'mfa-app@example.org', password: PASSWORD });
     const totp = speakeasy.totp({ secret: db.MFA_SECRET, encoding: 'base32' });
-    const v = await api().post('/api/v1/auth/verify-mfa').send({ mfaTicket: step.body.mfaTicket, code: totp, type: 'app' });
+    const v = await api()
+      .post('/api/v1/auth/verify-mfa')
+      .send({ mfaTicket: step.body.mfaTicket, code: totp, type: 'app' });
     expect(v.status).toBe(200);
   });
 
@@ -175,11 +192,11 @@ describe('MFA', () => {
     expect((await api().get('/api/v1/auth/profile').set(auth(step.body.mfaTicket))).status).toBe(401);
   });
 
-  test.failing('[BUG] MFA can be switched off with only a login token (no password or code)', async () => {
+  test('MFA cannot be switched off with only a login token', async () => {
     const t = await tokenFor(ID.mfaApp, 'faculty');
     const res = await api().post('/api/v1/auth/mfa/disable-all').set(auth(t)).send({});
-    expect(res.status).toBe(400); // expected: require password or current MFA code
-    await db.put('users', { ...(await db.get('users', ID.mfaApp)), mfaEnabled: true, mfaAppEnabled: true, mfaSecret: db.MFA_SECRET });
+    expect(res.status).toBe(403);
+    expect((await db.get('users', ID.mfaApp)).mfaAppEnabled).toBe(true);
   });
 
   test('app MFA setup: verify requires a valid code, then enables MFA', async () => {
@@ -187,18 +204,27 @@ describe('MFA', () => {
     const start = await api().post('/api/v1/auth/mfa/enable-app').set(auth(t));
     expect(start.status).toBe(200);
     expect(start.body.base32Secret).toBeTruthy();
-    expect((await api().post('/api/v1/auth/mfa/verify-app-setup').set(auth(t)).send({ token: 'abc' })).status).toBe(400);
+    expect((await api().post('/api/v1/auth/mfa/verify-app-setup').set(auth(t)).send({ token: 'abc' })).status).toBe(
+      400,
+    );
     const code = speakeasy.totp({ secret: start.body.base32Secret, encoding: 'base32' });
     expect((await api().post('/api/v1/auth/mfa/verify-app-setup').set(auth(t)).send({ token: code })).status).toBe(200);
     expect((await db.get('users', ID.faculty2)).mfaAppEnabled).toBe(true);
-    await api().post('/api/v1/auth/mfa/disable-all').set(auth(t));
+    await api()
+      .post('/api/v1/auth/mfa/disable-all')
+      .set(auth(t))
+      .send({
+        currentPassword: PASSWORD,
+        token: speakeasy.totp({ secret: start.body.base32Secret, encoding: 'base32' }),
+      });
   });
 });
 
 describe('token validation (authMiddleware)', () => {
   const PROFILE = '/api/v1/auth/profile';
   test('no token -> 401', async () => expect((await api().get(PROFILE)).status).toBe(401));
-  test('garbage token -> 401', async () => expect((await api().get(PROFILE).set(auth('abc.def.ghi'))).status).toBe(401));
+  test('garbage token -> 401', async () =>
+    expect((await api().get(PROFILE).set(auth('abc.def.ghi'))).status).toBe(401));
   test('token signed with another secret -> 401', async () => {
     const t = jwt.sign({ id: ID.admin, role: 'admin' }, 'attacker-secret');
     expect((await api().get(PROFILE).set(auth(t))).status).toBe(401);
@@ -234,7 +260,7 @@ describe('token validation (authMiddleware)', () => {
     const t = jwt.sign({ id: ID.faculty1, role: 'faculty', sessionId: other }, process.env.JWT_SECRET);
     expect((await api().get(PROFILE).set(auth(t))).status).toBe(401);
   });
-  test.failing('[BUG] token without a session (legacy) is accepted, so it can never be revoked', async () => {
+  test('a token without a session is rejected', async () => {
     const t = await tokenFor(ID.faculty1, 'faculty', { withSession: false });
     expect((await api().get(PROFILE).set(auth(t))).status).toBe(401);
   });
@@ -270,7 +296,9 @@ describe('sessions, refresh, logout', () => {
 
   test('change password keeps the current session working', async () => {
     const t = await tokenFor(ID.oa2, 'oa');
-    await api().post('/api/v1/auth/change-password').set(auth(t))
+    await api()
+      .post('/api/v1/auth/change-password')
+      .set(auth(t))
       .send({ currentPassword: PASSWORD, newPassword: PASSWORD, confirmPassword: PASSWORD });
     expect((await api().get('/api/v1/auth/profile').set(auth(t))).status).toBe(200);
   });
@@ -306,15 +334,29 @@ describe('sessions, refresh, logout', () => {
 describe('password change and reset', () => {
   test('change password: wrong current -> 401, mismatch -> 400', async () => {
     const t = await tokenFor(ID.faculty2, 'faculty');
-    expect((await api().post('/api/v1/auth/change-password').set(auth(t))
-      .send({ currentPassword: 'nope', newPassword: 'New-Passw0rd-123!', confirmPassword: 'New-Passw0rd-123!' })).status).toBe(401);
-    expect((await api().post('/api/v1/auth/change-password').set(auth(t))
-      .send({ currentPassword: PASSWORD, newPassword: 'New-Passw0rd-123!', confirmPassword: 'different' })).status).toBe(400);
+    expect(
+      (
+        await api()
+          .post('/api/v1/auth/change-password')
+          .set(auth(t))
+          .send({ currentPassword: 'nope', newPassword: 'New-Passw0rd-123!', confirmPassword: 'New-Passw0rd-123!' })
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await api()
+          .post('/api/v1/auth/change-password')
+          .set(auth(t))
+          .send({ currentPassword: PASSWORD, newPassword: 'New-Passw0rd-123!', confirmPassword: 'different' })
+      ).status,
+    ).toBe(400);
   });
 
-  test.failing('[BUG] change password accepts a 1-character password', async () => {
+  test('change password rejects a 1-character password', async () => {
     const t = await tokenFor(ID.oa2, 'oa');
-    const res = await api().post('/api/v1/auth/change-password').set(auth(t))
+    const res = await api()
+      .post('/api/v1/auth/change-password')
+      .set(auth(t))
       .send({ currentPassword: PASSWORD, newPassword: 'a', confirmPassword: 'a' });
     const accepted = res.status === 200;
     if (accepted) await db.put('users', { ...(await db.get('users', ID.oa2)), password: db.HASH });
@@ -324,7 +366,9 @@ describe('password change and reset', () => {
   test('[FIXED SEC-10] change password ends other sessions', async () => {
     const other = await tokenFor(ID.oa2, 'oa');
     const t = await tokenFor(ID.oa2, 'oa');
-    await api().post('/api/v1/auth/change-password').set(auth(t))
+    await api()
+      .post('/api/v1/auth/change-password')
+      .set(auth(t))
       .send({ currentPassword: PASSWORD, newPassword: PASSWORD, confirmPassword: PASSWORD });
     expect((await api().get('/api/v1/auth/profile').set(auth(other))).status).toBe(401);
   });
@@ -359,7 +403,7 @@ describe('password change and reset', () => {
     expect((await api().post(`/api/v1/auth/reset-password/${token}`).send({ password: PASSWORD })).status).toBe(400);
   });
 
-  test.failing('[BUG] reset password accepts a 1-character password', async () => {
+  test('reset password rejects a 1-character password', async () => {
     const token = await requestResetToken('faculty2@example.org');
     const res = await api().post(`/api/v1/auth/reset-password/${token}`).send({ password: 'a' });
     const accepted = res.status === 200;
@@ -385,19 +429,29 @@ describe('WhatsApp verification', () => {
     await db.put('users', { ...(await db.get('users', ID.faculty2)), whatsappVerified: false });
     const t = await tokenFor(ID.faculty2, 'faculty');
     sendWhatsAppMessage.mockClear();
-    expect((await api().post('/api/v1/auth/whatsapp/send-otp').set(auth(t)).send({ phone: '9876543210' })).status).toBe(200);
+    expect((await api().post('/api/v1/auth/whatsapp/send-otp').set(auth(t)).send({ phone: '9876543210' })).status).toBe(
+      200,
+    );
     expect(sendWhatsAppMessage).toHaveBeenCalled();
-    const otp = (await db.get('users', ID.faculty2)).whatsappOtp;
-    expect((await api().post('/api/v1/auth/whatsapp/verify-otp').set(auth(t)).send({ otp: '000000' === otp ? '111111' : '000000' })).status).toBe(400);
+    const otp = sendWhatsAppMessage.mock.calls[0][0].buttonParams[0];
+    expect((await db.get('users', ID.faculty2)).whatsappOtp).not.toBe(otp);
+    expect(
+      (
+        await api()
+          .post('/api/v1/auth/whatsapp/verify-otp')
+          .set(auth(t))
+          .send({ otp: '000000' === otp ? '111111' : '000000' })
+      ).status,
+    ).toBe(400);
     expect((await api().post('/api/v1/auth/whatsapp/verify-otp').set(auth(t)).send({ otp })).status).toBe(200);
     expect((await db.get('users', ID.faculty2)).whatsappVerified).toBe(true);
   });
 
-  test.failing('[BUG] WhatsApp OTP has no attempt limit', async () => {
+  test('WhatsApp OTP is refused after five wrong attempts', async () => {
     await db.put('users', { ...(await db.get('users', ID.faculty2)), whatsappVerified: false });
     const t = await tokenFor(ID.faculty2, 'faculty');
     await api().post('/api/v1/auth/whatsapp/send-otp').set(auth(t)).send({});
-    const otp = (await db.get('users', ID.faculty2)).whatsappOtp;
+    const otp = sendWhatsAppMessage.mock.calls.at(-1)[0].buttonParams[0];
     for (let i = 0; i < 15; i++) {
       const g = String(200000 + i);
       if (g !== otp) await api().post('/api/v1/auth/whatsapp/verify-otp').set(auth(t)).send({ otp: g });

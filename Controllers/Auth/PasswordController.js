@@ -5,6 +5,7 @@ const path = require('path');
 const User = require('../../Models/User');
 const Session = require('../../Models/Session');
 const { sendEmail } = require('../../utils/email');
+const { passwordPolicyError } = require('../../domain/passwordPolicy');
 
 /**
  * Forgot Password
@@ -25,7 +26,7 @@ async function forgotPassword(req, res, next) {
 
       await User.update(user._id, {
         resetPasswordToken: hashedToken,
-        resetPasswordExpires: resetExpires
+        resetPasswordExpires: resetExpires,
       });
 
       // Prepare Email
@@ -50,7 +51,7 @@ async function forgotPassword(req, res, next) {
         to: user.email,
         subject: 'Reset your password - CreditHub',
         html,
-        text: `Reset your password here: ${resetUrl}`
+        text: `Reset your password here: ${resetUrl}`,
       });
     }
 
@@ -71,6 +72,8 @@ async function resetPassword(req, res, next) {
     if (!token || !password) {
       return res.status(400).json({ success: false, message: 'Token and new password required' });
     }
+    const policyError = await passwordPolicyError(password);
+    if (policyError) return res.status(400).json({ success: false, message: policyError });
 
     const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
 
@@ -78,10 +81,9 @@ async function resetPassword(req, res, next) {
     // Note: Since User.find() performs a Scan, this is inefficient but acceptable for MVP.
     // In production, use GSI on resetPasswordToken.
     const allUsers = await User.find();
-    const user = allUsers.find(u =>
-      u.resetPasswordToken === hashedToken &&
-      u.resetPasswordExpires &&
-      Date.now() < Number(u.resetPasswordExpires)
+    const user = allUsers.find(
+      (u) =>
+        u.resetPasswordToken === hashedToken && u.resetPasswordExpires && Date.now() < Number(u.resetPasswordExpires),
     );
 
     if (!user) {
@@ -89,7 +91,7 @@ async function resetPassword(req, res, next) {
     }
 
     // Hash new password
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, 12);
 
     // Update User
     await User.update(user._id, {
@@ -97,7 +99,7 @@ async function resetPassword(req, res, next) {
       resetPasswordToken: null,
       resetPasswordExpires: null,
       passwordChangedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
     });
 
     // A reset means the old password may be known to someone else:
@@ -123,11 +125,10 @@ async function resetPassword(req, res, next) {
       to: user.email,
       subject: 'Password Changed Successfully',
       html,
-      text: 'Your password has been changed.'
+      text: 'Your password has been changed.',
     });
 
     res.json({ success: true, message: 'Password has been reset successfully' });
-
   } catch (err) {
     next(err);
   }

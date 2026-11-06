@@ -1,5 +1,13 @@
 // Middleware/errorMiddleware.js
 function errorHandler(err, req, res, next) {
+  if (err.name === 'ConditionalCheckFailedException')
+    return res.status(409).json({ success: false, message: 'This record changed. Reload and try again.' });
+  if (err.name === 'ResourceNotFoundException') {
+    console.error(`Required application storage is missing for ${req.method} ${req.path}`);
+    return res
+      .status(503)
+      .json({ success: false, message: 'Application storage is unavailable. Contact the site administrator.' });
+  }
   if (['UnrecognizedClientException', 'InvalidClientTokenId', 'ExpiredTokenException'].includes(err.name || err.code)) {
     console.error(`DynamoDB authentication failed: ${err.name || err.code}`);
     return res.status(503).json({

@@ -18,50 +18,103 @@ const {
   deleteAppeal,
   getSingleCredit,
   updateNegativeCredit,
-  deleteNegativeCredit
+  deleteNegativeCredit,
 } = require('../Controllers/creditController');
 
-const { authMiddleware, adminOnly, requirePermission, requireSelfOrPermission } = require('../Middleware/authMiddleware');
+const {
+  authMiddleware,
+  adminOnly,
+  requirePermission,
+  requireSelfOrPermission,
+} = require('../Middleware/authMiddleware');
 const { ensureWhatsappVerified } = require('../Middleware/whatsappMiddleware');
+const { requireOpenAcademicYear } = require('../Middleware/academicYearMiddleware');
 
 // Configure multer to use memory storage (serverless-safe)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (req, file, cb) => {
-    const allowed = (process.env.ASSET_ALLOWED_EXT ||
-      'pdf,png,jpg,jpeg,webp,gif,svg,txt,csv,json,doc,docx,xls,xlsx,zip,mp4,webm'
+    const allowed = (
+      process.env.ASSET_ALLOWED_EXT || 'pdf,png,jpg,jpeg,webp,gif,svg,txt,csv,json,doc,docx,xls,xlsx,zip,mp4,webm'
     ).split(',');
     const ext = file.originalname.split('.').pop().toLowerCase();
     if (!allowed.includes(ext)) return cb(new Error('File type not allowed'), false);
     cb(null, true);
-  }
+  },
 });
 
 /**
  * Faculty routes
  */
 // Positive Credits
-router.post('/credits/positive', authMiddleware, requirePermission('credit.submit'), ensureWhatsappVerified, upload.single('proof'), submitPositiveCredit);
-router.put('/credits/positive/:creditId', authMiddleware, requirePermission('credit.submit'), ensureWhatsappVerified, upload.single('proof'), updatePositiveCredit);
-router.delete('/credits/positive/:creditId', authMiddleware, requirePermission('credit.submit'), ensureWhatsappVerified, deletePositiveCredit);
+router.post(
+  '/credits/positive',
+  authMiddleware,
+  requirePermission('credit.submit'),
+  ensureWhatsappVerified,
+  upload.single('proof'),
+  requireOpenAcademicYear,
+  submitPositiveCredit,
+);
+router.put(
+  '/credits/positive/:creditId',
+  authMiddleware,
+  requirePermission('credit.submit'),
+  ensureWhatsappVerified,
+  upload.single('proof'),
+  requireOpenAcademicYear,
+  updatePositiveCredit,
+);
+router.delete(
+  '/credits/positive/:creditId',
+  authMiddleware,
+  requirePermission('credit.submit'),
+  ensureWhatsappVerified,
+  deletePositiveCredit,
+);
 
-router.get('/credits/faculty/:facultyId', authMiddleware, requireSelfOrPermission('facultyId', 'credit.read:any'), listCreditsForFaculty);
+router.get(
+  '/credits/faculty/:facultyId',
+  authMiddleware,
+  requireSelfOrPermission('facultyId', 'credit.read:any'),
+  listCreditsForFaculty,
+);
 
 /**
  * Admin routes
  */
 router.post('/credit-title', authMiddleware, requirePermission('credit.title.manage'), createCreditTitle);
 router.get('/credit-title', authMiddleware, requirePermission('credit.title.read'), listCreditTitles);
-router.post('/credits/negative', authMiddleware, requirePermission('credit.issue'), upload.single('proof'), adminIssueNegativeCredit);
-router.put('/credits/negative/:creditId', authMiddleware, adminOnly, upload.single('proof'), updateNegativeCredit);
+router.post(
+  '/credits/negative',
+  authMiddleware,
+  requirePermission('credit.issue'),
+  upload.single('proof'),
+  requireOpenAcademicYear,
+  adminIssueNegativeCredit,
+);
+router.put(
+  '/credits/negative/:creditId',
+  authMiddleware,
+  adminOnly,
+  upload.single('proof'),
+  requireOpenAcademicYear,
+  updateNegativeCredit,
+);
 router.delete('/credits/negative/:creditId', authMiddleware, adminOnly, deleteNegativeCredit);
 
 // Faculty: get all negative credits (with filters)
 router.get('/credits/negative', authMiddleware, getNegativeCredits);
 
 // Faculty: appeal a negative credit
-router.post('/credits/:creditId/appeal', authMiddleware, ensureWhatsappVerified, upload.single('proof'), appealNegativeCredit);
+router.post(
+  '/credits/:creditId/appeal',
+  authMiddleware,
+  ensureWhatsappVerified,
+  upload.single('proof'),
+  appealNegativeCredit,
+);
 router.put('/credits/appeals/:creditId', authMiddleware, ensureWhatsappVerified, upload.single('proof'), updateAppeal);
 router.delete('/credits/appeals/:creditId', authMiddleware, ensureWhatsappVerified, deleteAppeal);
 
@@ -72,11 +125,20 @@ router.get(
   '/credits/faculty/:facultyId/negative',
   authMiddleware,
   requireSelfOrPermission('facultyId', 'credit.read:any'),
-  getNegativeCreditsByFacultyId
+  getNegativeCreditsByFacultyId,
 );
 
-router.post('/credits/:facultyId/recalc-credits', authMiddleware, requirePermission('credit.issue'), recalcCreditsController);
-router.get('/:facultyId/credits', authMiddleware, requireSelfOrPermission('facultyId', 'credit.read:any'), getFacultyCredits);
-
+router.post(
+  '/credits/:facultyId/recalc-credits',
+  authMiddleware,
+  requirePermission('credit.issue'),
+  recalcCreditsController,
+);
+router.get(
+  '/:facultyId/credits',
+  authMiddleware,
+  requireSelfOrPermission('facultyId', 'credit.read:any'),
+  getFacultyCredits,
+);
 
 module.exports = router;

@@ -1,12 +1,7 @@
 const { newObjectId } = require('../utils/objectId');
 const { getDynamoClient } = require('../config/db');
 require('dotenv').config();
-const {
-  PutCommand,
-  GetCommand,
-  ScanCommand,
-  UpdateCommand,
-} = require('@aws-sdk/lib-dynamodb');
+const { PutCommand, GetCommand, ScanCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
 
 const TABLE = process.env.DYNAMO_DB_USERS;
 
@@ -95,9 +90,7 @@ module.exports = {
    */
   async findById(id) {
     const client = getDynamoClient();
-    const res = await client.send(
-      new GetCommand({ TableName: TABLE, Key: { _id: id } })
-    );
+    const res = await client.send(new GetCommand({ TableName: TABLE, Key: { _id: id } }));
     return res.Item || null;
   },
 
@@ -120,10 +113,38 @@ module.exports = {
         UpdateExpression: `SET ${updates.join(', ')}`,
         ExpressionAttributeNames: expNames,
         ExpressionAttributeValues: expValues,
-      })
+      }),
     );
 
     return { _id: id, ...data };
+  },
+
+  // Placement and its history change together. A stale form cannot overwrite a transfer.
+  async updateCompared(user, data) {
+    const fields = Object.keys(data);
+    const names = Object.fromEntries(fields.map((key, i) => [`#f${i}`, key]));
+    const values = Object.fromEntries(fields.map((key, i) => [`:v${i}`, data[key]]));
+    const conditions = [];
+    for (const [index, key] of ['updatedAt', 'college', 'department'].entries()) {
+      names[`#old${index}`] = key;
+      if (user[key] === undefined) conditions.push(`attribute_not_exists(#old${index})`);
+      else {
+        conditions.push(`#old${index} = :old${index}`);
+        values[`:old${index}`] = user[key];
+      }
+    }
+    const result = await getDynamoClient().send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { _id: String(user._id) },
+        UpdateExpression: `SET ${fields.map((_, i) => `#f${i} = :v${i}`).join(', ')}`,
+        ConditionExpression: conditions.join(' AND '),
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+        ReturnValues: 'ALL_NEW',
+      }),
+    );
+    return result.Attributes;
   },
 
   /**

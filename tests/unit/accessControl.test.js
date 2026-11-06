@@ -1,8 +1,24 @@
 jest.mock('../../Models/Credit', () => ({ findById: jest.fn(), updateOwned: jest.fn() }));
 jest.mock('../../Models/CreditTitle', () => ({ findById: jest.fn() }));
-jest.mock('../../Models/User', () => ({ findById: jest.fn(), find: jest.fn(), create: jest.fn(), update: jest.fn() }));
+jest.mock('../../Models/User', () => ({
+  findById: jest.fn(),
+  find: jest.fn(),
+  create: jest.fn(),
+  update: jest.fn(),
+  updateCompared: jest.fn(),
+}));
 jest.mock('../../Models/Session', () => ({ findByUserId: jest.fn(), revoke: jest.fn() }));
 jest.mock('../../config/db', () => ({ connectDB: jest.fn().mockResolvedValue(undefined) }));
+jest.mock('../../domain/applicationSettings', () => ({
+  getSettings: jest.fn().mockResolvedValue({ passwordMinLength: 12 }),
+  placement: jest.fn().mockReturnValue({
+    institutionId: 'egsp',
+    collegeId: 'engineering',
+    departmentId: 'mba',
+    college: 'Engineering',
+    department: 'MBA',
+  }),
+}));
 jest.mock('../../utils/calculateCredits', () => ({ recalcFacultyCredits: jest.fn().mockResolvedValue({}) }));
 jest.mock('../../utils/fileUpload', () => ({ handleFileUpload: jest.fn() }));
 
@@ -13,18 +29,34 @@ const Session = require('../../Models/Session');
 const { recalcFacultyCredits } = require('../../utils/calculateCredits');
 const { permissionsFor, hasPermission } = require('../../config/permissions');
 const { updateOwnIssuedCredit, voidOwnIssuedCredit } = require('../../Controllers/oaCreditController');
-const { publicUser, createUser, listUsers, getUser, deactivateUser, resetUserPassword } = require('../../Controllers/Admin/UserManagementController');
+const {
+  publicUser,
+  createUser,
+  listUsers,
+  getUser,
+  deactivateUser,
+  resetUserPassword,
+} = require('../../Controllers/Admin/UserManagementController');
 const { requirePermission } = require('../../Middleware/authMiddleware');
 const { sanitizeUser } = require('../../utils/sanitizeUser');
 
-const baseCredit = { _id: 'credit-1', faculty: 'faculty-1', issuedBy: 'oa-1', type: 'negative',
-  title: 'Violation', points: -5, status: 'pending', updatedAt: '2026-09-28T00:00:00.000Z' };
+const baseCredit = {
+  _id: 'credit-1',
+  faculty: 'faculty-1',
+  issuedBy: 'oa-1',
+  type: 'negative',
+  title: 'Violation',
+  points: -5,
+  status: 'pending',
+  updatedAt: '2026-09-28T00:00:00.000Z',
+};
 const response = () => ({ status: jest.fn().mockReturnThis(), json: jest.fn().mockReturnThis() });
 
 beforeEach(() => {
   jest.clearAllMocks();
   Credit.findById.mockResolvedValue(baseCredit);
   Credit.updateOwned.mockResolvedValue({ ...baseCredit, status: 'deleted' });
+  Session.findByUserId.mockResolvedValue([]);
 });
 
 test('OA role cannot acquire admin rights through stored permission overrides', () => {
@@ -44,13 +76,24 @@ test('OA cannot enter admin user creation', () => {
 
 test('admin creation stores a faculty account and returns no credentials', async () => {
   User.find.mockResolvedValue([]);
-  User.create.mockImplementation(async data => ({ _id: 'faculty-3', ...data }));
+  User.create.mockImplementation(async (data) => ({ _id: 'faculty-3', ...data }));
   const res = response();
   res.status = jest.fn().mockReturnThis();
-  await createUser({ user: { _id: 'admin-1', role: 'admin' }, fields: {
-    name: 'New Faculty', email: 'new@example.edu', password: 'secure-password-123', role: 'faculty',
-    college: 'Engineering', department: 'MBA',
-  } }, res, jest.fn());
+  await createUser(
+    {
+      user: { _id: 'admin-1', role: 'admin' },
+      fields: {
+        name: 'New Faculty',
+        email: 'new@example.edu',
+        password: 'secure-password-123',
+        role: 'faculty',
+        college: 'Engineering',
+        department: 'MBA',
+      },
+    },
+    res,
+    jest.fn(),
+  );
   expect(res.status).toHaveBeenCalledWith(201);
   expect(User.create).toHaveBeenCalledWith(expect.objectContaining({ role: 'faculty', createdBy: 'admin-1' }));
   expect(res.json.mock.calls[0][0].data).not.toHaveProperty('password');
@@ -58,8 +101,16 @@ test('admin creation stores a faculty account and returns no credentials', async
 });
 
 test('account directory responses never expose credentials or MFA secrets', () => {
-  const account = { _id: 'faculty-1', role: 'faculty', name: 'Asha', email: 'asha@example.edu',
-    password: 'hash', apiKey: 'secret', mfaSecret: 'secret', resetPasswordToken: 'secret' };
+  const account = {
+    _id: 'faculty-1',
+    role: 'faculty',
+    name: 'Asha',
+    email: 'asha@example.edu',
+    password: 'hash',
+    apiKey: 'secret',
+    mfaSecret: 'secret',
+    resetPasswordToken: 'secret',
+  };
   expect(publicUser(account)).toMatchObject({ _id: 'faculty-1', name: 'Asha', isActive: true });
   for (const field of ['password', 'apiKey', 'mfaSecret', 'resetPasswordToken']) {
     expect(publicUser(account)).not.toHaveProperty(field);
@@ -76,8 +127,9 @@ test('OA directory lists active faculty only and hides staff accounts', async ()
   ]);
   const res = response();
   await listUsers({ user: { _id: 'oa-1', role: 'oa' }, query: {} }, res, jest.fn());
-  expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ total: 1,
-    items: [expect.objectContaining({ _id: 'faculty-1', role: 'faculty' })] }));
+  expect(res.json).toHaveBeenCalledWith(
+    expect.objectContaining({ total: 1, items: [expect.objectContaining({ _id: 'faculty-1', role: 'faculty' })] }),
+  );
   expect(res.json.mock.calls[0][0].items[0]).not.toHaveProperty('password');
 });
 
@@ -89,12 +141,16 @@ test('OA cannot fetch another OA account through the user detail route', async (
 });
 
 test('deactivating an account preserves its user record', async () => {
-  User.findById.mockResolvedValueOnce({ _id: 'faculty-1', role: 'faculty', isActive: true })
+  User.findById
+    .mockResolvedValueOnce({ _id: 'faculty-1', role: 'faculty', isActive: true })
     .mockResolvedValueOnce({ _id: 'faculty-1', role: 'faculty', isActive: false });
-  User.update.mockResolvedValue({});
+  User.updateCompared.mockResolvedValue({});
   const res = response();
   await deactivateUser({ user: { _id: 'admin-1', role: 'admin' }, params: { id: 'faculty-1' } }, res, jest.fn());
-  expect(User.update).toHaveBeenCalledWith('faculty-1', expect.objectContaining({ isActive: false }));
+  expect(User.updateCompared).toHaveBeenCalledWith(
+    expect.objectContaining({ _id: 'faculty-1' }),
+    expect.objectContaining({ isActive: false }),
+  );
   expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
 });
 
@@ -104,8 +160,11 @@ test('password reset revokes existing sessions and returns no password', async (
   Session.findByUserId.mockResolvedValue([{ _id: 'session-1' }]);
   Session.revoke.mockResolvedValue({});
   const res = response();
-  await resetUserPassword({ user: { _id: 'admin-1', role: 'admin' }, params: { id: 'faculty-1' },
-    body: { password: 'new-secure-password' } }, res, jest.fn());
+  await resetUserPassword(
+    { user: { _id: 'admin-1', role: 'admin' }, params: { id: 'faculty-1' }, body: { password: 'new-secure-password' } },
+    res,
+    jest.fn(),
+  );
   expect(Session.revoke).toHaveBeenCalledWith('session-1');
   expect(res.json).toHaveBeenCalledWith({ success: true, message: 'Password reset and active sessions revoked' });
 });
@@ -127,22 +186,39 @@ test('issuing OA voids a credit while retaining its record and audit event', asy
   const req = { user: { _id: 'oa-1', role: 'oa' }, params: { id: 'credit-1' }, body: { reason: 'Entered in error' } };
   const res = response();
   await voidOwnIssuedCredit(req, res, jest.fn());
-  expect(Credit.updateOwned).toHaveBeenCalledWith('credit-1', 'oa-1',
+  expect(Credit.updateOwned).toHaveBeenCalledWith(
+    'credit-1',
+    'oa-1',
     expect.objectContaining({ status: 'deleted', deletedBy: 'oa-1' }),
-    expect.objectContaining({ action: 'voided', reason: 'Entered in error' }), baseCredit.updatedAt);
+    expect.objectContaining({ action: 'voided', reason: 'Entered in error' }),
+    baseCredit.updatedAt,
+  );
   expect(recalcFacultyCredits).toHaveBeenCalledWith('faculty-1');
   expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
 });
 
 test('issuing OA can change a category but cannot set arbitrary points', async () => {
-  CreditTitle.findById.mockResolvedValue({ _id: 'title-2', title: 'New violation', type: 'negative', points: 7, isActive: true });
-  const req = { user: { _id: 'oa-1', role: 'oa' }, params: { id: 'credit-1' },
-    body: { creditTitleId: 'title-2', notes: 'Corrected category' } };
+  CreditTitle.findById.mockResolvedValue({
+    _id: 'title-2',
+    title: 'New violation',
+    type: 'negative',
+    points: 7,
+    isActive: true,
+  });
+  const req = {
+    user: { _id: 'oa-1', role: 'oa' },
+    params: { id: 'credit-1' },
+    body: { creditTitleId: 'title-2', notes: 'Corrected category' },
+  };
   const res = response();
   await updateOwnIssuedCredit(req, res, jest.fn());
-  expect(Credit.updateOwned).toHaveBeenCalledWith('credit-1', 'oa-1',
+  expect(Credit.updateOwned).toHaveBeenCalledWith(
+    'credit-1',
+    'oa-1',
     expect.objectContaining({ creditTitle: 'title-2', title: 'New violation', points: -7 }),
-    expect.objectContaining({ action: 'edited' }), baseCredit.updatedAt);
+    expect.objectContaining({ action: 'edited' }),
+    baseCredit.updatedAt,
+  );
   expect(recalcFacultyCredits).toHaveBeenCalledWith('faculty-1');
   Credit.updateOwned.mockClear();
   await updateOwnIssuedCredit({ ...req, body: { points: -100 } }, response(), jest.fn());
@@ -151,12 +227,23 @@ test('issuing OA can change a category but cannot set arbitrary points', async (
 
 test('manual positive point correction requires a reason and records the old and new amount', async () => {
   Credit.findById.mockResolvedValue({ ...baseCredit, type: 'positive', status: 'approved', points: 5 });
-  const req = { user: { _id: 'oa-1', role: 'oa' }, params: { id: 'credit-1' },
-    body: { points: '8', reason: 'Approved correction' } };
+  const req = {
+    user: { _id: 'oa-1', role: 'oa' },
+    params: { id: 'credit-1' },
+    body: { points: '8', reason: 'Approved correction' },
+  };
   await updateOwnIssuedCredit(req, response(), jest.fn());
-  expect(Credit.updateOwned).toHaveBeenCalledWith('credit-1', 'oa-1', expect.objectContaining({ points: 8 }),
-    expect.objectContaining({ reason: 'Approved correction', before: expect.objectContaining({ points: 5 }),
-      after: expect.objectContaining({ points: 8 }) }), baseCredit.updatedAt);
+  expect(Credit.updateOwned).toHaveBeenCalledWith(
+    'credit-1',
+    'oa-1',
+    expect.objectContaining({ points: 8 }),
+    expect.objectContaining({
+      reason: 'Approved correction',
+      before: expect.objectContaining({ points: 5 }),
+      after: expect.objectContaining({ points: 8 }),
+    }),
+    baseCredit.updatedAt,
+  );
   Credit.updateOwned.mockClear();
   await updateOwnIssuedCredit({ ...req, body: { points: '8' } }, response(), jest.fn());
   expect(Credit.updateOwned).not.toHaveBeenCalled();
@@ -164,7 +251,11 @@ test('manual positive point correction requires a reason and records the old and
 
 test('voiding requires a recorded reason', async () => {
   const res = response();
-  await voidOwnIssuedCredit({ user: { _id: 'oa-1', role: 'oa' }, params: { id: 'credit-1' }, body: {} }, res, jest.fn());
+  await voidOwnIssuedCredit(
+    { user: { _id: 'oa-1', role: 'oa' }, params: { id: 'credit-1' }, body: {} },
+    res,
+    jest.fn(),
+  );
   expect(res.status).toHaveBeenCalledWith(400);
   expect(Credit.updateOwned).not.toHaveBeenCalled();
 });
@@ -172,7 +263,11 @@ test('voiding requires a recorded reason', async () => {
 test('OA cannot void a credit while the faculty appeal is pending', async () => {
   Credit.findById.mockResolvedValue({ ...baseCredit, appeal: { status: 'pending' } });
   const res = response();
-  await voidOwnIssuedCredit({ user: { _id: 'oa-1', role: 'oa' }, params: { id: 'credit-1' }, body: { reason: 'Entered in error' } }, res, jest.fn());
+  await voidOwnIssuedCredit(
+    { user: { _id: 'oa-1', role: 'oa' }, params: { id: 'credit-1' }, body: { reason: 'Entered in error' } },
+    res,
+    jest.fn(),
+  );
   expect(res.status).toHaveBeenCalledWith(409);
   expect(Credit.updateOwned).not.toHaveBeenCalled();
 });

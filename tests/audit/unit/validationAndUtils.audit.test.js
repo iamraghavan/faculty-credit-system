@@ -50,7 +50,16 @@ describe('credit schemas', () => {
 
 describe('validate() middleware', () => {
   test('rejects invalid body with 400', () => {
-    const res = { status(c) { this.c = c; return this; }, json(b) { this.b = b; return this; } };
+    const res = {
+      status(c) {
+        this.c = c;
+        return this;
+      },
+      json(b) {
+        this.b = b;
+        return this;
+      },
+    };
     validate(schemas.creditTitle.create)({ body: {} }, res, () => {});
     expect(res.c).toBe(400);
   });
@@ -62,12 +71,18 @@ describe('validate() middleware', () => {
 });
 
 describe('policy + profile schemas', () => {
-  const rule = { ruleId: 'paper.journal', name: 'Journal paper', creditType: 'positive', calculation: { basePoints: 10 } };
+  const rule = {
+    ruleId: 'paper.journal',
+    name: 'Journal paper',
+    creditType: 'positive',
+    calculation: { basePoints: 10 },
+  };
   const policy = { name: 'Policy 1', effectiveFrom: '2025-06-01', effectiveTo: null, rules: [rule] };
   test('valid policy', () => ok(policySchema, policy));
   test('duplicate ruleIds rejected', () => bad(policySchema, { ...policy, rules: [rule, rule] }));
   test('effectiveTo before effectiveFrom rejected', () => bad(policySchema, { ...policy, effectiveTo: '2025-01-01' }));
-  test('basePoints over 100000 rejected', () => bad(policySchema, { ...policy, rules: [{ ...rule, calculation: { basePoints: 100001 } }] }));
+  test('basePoints over 100000 rejected', () =>
+    bad(policySchema, { ...policy, rules: [{ ...rule, calculation: { basePoints: 100001 } }] }));
   test('ORCID format', () => {
     ok(professionalProfileSchema, { researchIds: { orcid: '0000-0002-1825-009X' } });
     bad(professionalProfileSchema, { researchIds: { orcid: '1234' } });
@@ -83,19 +98,36 @@ describe('policy + profile schemas', () => {
 describe('policy engine', () => {
   const policy = {
     status: 'published',
-    rules: [{
-      ruleId: 'r1', creditType: 'positive',
-      eligibility: { all: [{ field: 'paper.indexed', operator: 'equals', value: true }] },
-      requiredEvidence: [{ type: 'pdf', required: true }],
-      calculation: { basePoints: 10, multiplierRules: [{ when: { field: 'paper.q1', operator: 'equals', value: true }, multiplier: 2, label: 'Q1' }], perEventCap: 15, periodCap: 30, roundingScale: 2 },
-    }, { ruleId: 'n1', creditType: 'negative', calculation: { basePoints: 3 } }],
+    rules: [
+      {
+        ruleId: 'r1',
+        creditType: 'positive',
+        eligibility: { all: [{ field: 'paper.indexed', operator: 'equals', value: true }] },
+        requiredEvidence: [{ type: 'pdf', required: true }],
+        calculation: {
+          basePoints: 10,
+          multiplierRules: [
+            { when: { field: 'paper.q1', operator: 'equals', value: true }, multiplier: 2, label: 'Q1' },
+          ],
+          perEventCap: 15,
+          periodCap: 30,
+          roundingScale: 2,
+        },
+      },
+      { ruleId: 'n1', creditType: 'negative', calculation: { basePoints: 3 } },
+    ],
   };
   test('multiplier then per-event cap', () => {
     const r = evaluateCreditRule(policy, 'r1', { paper: { indexed: true, q1: true }, evidenceTypes: ['pdf'] });
     expect(r.calculation.signedImpact).toBe(15);
   });
   test('period cap limits remaining award', () => {
-    const r = evaluateCreditRule(policy, 'r1', { paper: { indexed: true }, evidenceTypes: ['pdf'] }, { alreadyAwarded: 25 });
+    const r = evaluateCreditRule(
+      policy,
+      'r1',
+      { paper: { indexed: true }, evidenceTypes: ['pdf'] },
+      { alreadyAwarded: 25 },
+    );
     expect(r.calculation.magnitude).toBe(5);
   });
   test('missing evidence -> no calculation', () => {
@@ -138,17 +170,40 @@ describe('export signatures', () => {
 describe('utilities', () => {
   test('sanitizeUser removes every secret field', () => {
     const out = sanitizeUser({
-      name: 'a', password: 'h', apiKey: 'k', mfaSecret: 's', mfaCode: '1', whatsappOtp: '2',
-      resetPasswordToken: 't', fcmToken: 'f', mfaPendingSecret: 'pending',
+      name: 'a',
+      password: 'h',
+      apiKey: 'k',
+      mfaSecret: 's',
+      mfaCode: '1',
+      whatsappOtp: '2',
+      resetPasswordToken: 't',
+      fcmToken: 'f',
+      mfaPendingSecret: 'pending',
     });
-    expect(Object.keys(out)).toEqual(expect.not.arrayContaining(['password', 'apiKey', 'mfaSecret', 'mfaCode', 'whatsappOtp', 'resetPasswordToken', 'fcmToken']));
+    expect(Object.keys(out)).toEqual(
+      expect.not.arrayContaining([
+        'password',
+        'apiKey',
+        'mfaSecret',
+        'mfaCode',
+        'whatsappOtp',
+        'resetPasswordToken',
+        'fcmToken',
+      ]),
+    );
   });
-  test.failing('[BUG] sanitizeUser leaks mfaPendingSecret (MFA setup secret)', () => {
+  test('sanitizeUser hides the MFA setup secret', () => {
     expect(sanitizeUser({ mfaPendingSecret: 'pending' })).not.toHaveProperty('mfaPendingSecret');
   });
   test.each([
-    ['EGS Pillay Engineering College', 'EGSP/EC/'], ['Arts and Science', 'EGSP/ASC/'], ['Polytechnic', 'EGSP/PC/'],
-    ['Nursing', 'EGSP/NUR/'], ['College of Education', 'EGSP/EDU/'], ['Pharmacy', 'EGSP/PHARM/'], ['Naturopathy', 'EGSP/NYS/'], ['', 'EGSP/GEN/'],
+    ['EGS Pillay Engineering College', 'EGSP/EC/'],
+    ['Arts and Science', 'EGSP/ASC/'],
+    ['Polytechnic', 'EGSP/PC/'],
+    ['Nursing', 'EGSP/NUR/'],
+    ['College of Education', 'EGSP/EDU/'],
+    ['Pharmacy', 'EGSP/PHARM/'],
+    ['Naturopathy', 'EGSP/NYS/'],
+    ['', 'EGSP/GEN/'],
   ])('facultyID prefix for %p', (college, prefix) => {
     expect(generateFacultyID(college)).toMatch(new RegExp(`^${prefix.replace(/\//g, '\\/')}\\d{5}$`));
   });

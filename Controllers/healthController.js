@@ -17,10 +17,15 @@ exports.ready = async (req, res) => {
   res.set('Cache-Control', 'no-store');
   try {
     const client = getDynamoClient();
-    await client.send(
-      new GetCommand({ TableName: process.env.DYNAMO_DB_USERS, Key: { _id: '__health_check__' } }),
-      { abortSignal: AbortSignal.timeout(READY_TIMEOUT_MS) },
-    );
+    for (const TableName of [
+      process.env.DYNAMO_DB_USERS,
+      process.env.DYNAMO_DB_POLICIES,
+      process.env.DYNAMO_DB_NOTIFICATIONS,
+    ]) {
+      await client.send(new GetCommand({ TableName, Key: { _id: '__health_check__' } }), {
+        abortSignal: AbortSignal.timeout(READY_TIMEOUT_MS),
+      });
+    }
     res.json({ status: 'ok' });
   } catch (error) {
     console.error('Readiness check failed:', error.name || error.message);

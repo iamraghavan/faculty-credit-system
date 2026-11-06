@@ -1,9 +1,11 @@
 const jwt = require('jsonwebtoken');
 const User = require('../../Models/User');
+const Session = require('../../Models/Session');
 const { authMiddleware, AdminMiddleware, adminOnly, adminOrOA } = require('../../Middleware/authMiddleware');
 
 jest.mock('jsonwebtoken');
 jest.mock('../../Models/User');
+jest.mock('../../Models/Session');
 
 describe('Auth Middleware Security Tests', () => {
   let req, res, next;
@@ -31,7 +33,9 @@ describe('Auth Middleware Security Tests', () => {
 
     it('should block request with invalid token', async () => {
       req.headers.authorization = 'Bearer invalid-token';
-      jwt.verify.mockImplementation(() => { throw new Error('Invalid token'); });
+      jwt.verify.mockImplementation(() => {
+        throw new Error('Invalid token');
+      });
 
       await authMiddleware(req, res, next);
       expect(res.status).toHaveBeenCalledWith(401);
@@ -40,8 +44,13 @@ describe('Auth Middleware Security Tests', () => {
 
     it('should authenticate user with valid token', async () => {
       req.headers.authorization = 'Bearer valid-token';
-      jwt.verify.mockReturnValue({ id: 'user123' });
+      jwt.verify.mockReturnValue({ id: 'user123', sessionId: 'session123' });
       User.findById.mockResolvedValue({ id: 'user123', name: 'Test User' });
+      Session.findById.mockResolvedValue({
+        userId: 'user123',
+        isValid: true,
+        expiresAt: new Date(Date.now() + 60000).toISOString(),
+      });
 
       await authMiddleware(req, res, next);
       expect(next).toHaveBeenCalled();

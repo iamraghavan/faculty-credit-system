@@ -13,6 +13,7 @@
     "test:legacy": "jest --selectProjects legacy --forceExit",
     "test:db:install": "node scripts/test/install-dynamodb-local.js",
     "db:local": "node scripts/test/db-local.js",
+    "db:provision:application": "node scripts/provision-application-tables.js",
     "test:server": "node tests/support/testServer.js",
     "smoke": "node scripts/test/smoke.js",
     "lint": "eslint .",

@@ -18,16 +18,15 @@ async function authMiddleware(req, res, next) {
     if (!user) return res.status(401).json({ success: false, message: 'Unauthorized' });
     if (user.isActive === false) return res.status(403).json({ success: false, message: 'Account is inactive' });
 
-    if (decoded.sessionId) {
-      const session = await Session.findById(decoded.sessionId);
-      const expired = !session?.expiresAt || new Date(session.expiresAt).getTime() <= Date.now();
-      if (!session || !session.isValid || expired || String(session.userId) !== String(user._id || user.id)) {
-        return res.status(401).json({ success: false, message: 'Session expired or revoked' });
-      }
-      req.session = session;
-    } else if (String(process.env.REQUIRE_SESSION_VALIDATION).toLowerCase() === 'true') {
-      return res.status(401).json({ success: false, message: 'Legacy token is no longer accepted' });
+    if (!decoded.sessionId) {
+      return res.status(401).json({ success: false, message: 'Session is required' });
     }
+    const session = await Session.findById(decoded.sessionId);
+    const expired = !session?.expiresAt || new Date(session.expiresAt).getTime() <= Date.now();
+    if (!session || !session.isValid || expired || String(session.userId) !== String(user._id || user.id)) {
+      return res.status(401).json({ success: false, message: 'Session expired or revoked' });
+    }
+    req.session = session;
 
     req.user = user;
     req.auth = decoded;
@@ -80,7 +79,7 @@ function requirePermission(permission) {
 function requireAnyPermission(...permissions) {
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ success: false, message: 'Unauthorized' });
-    if (permissions.some(permission => hasPermission(req.user, permission))) return next();
+    if (permissions.some((permission) => hasPermission(req.user, permission))) return next();
     return res.status(403).json({ success: false, message: 'Insufficient permissions' });
   };
 }
@@ -90,9 +89,17 @@ function requireSelfOrPermission(paramName, permission) {
     const requestedId = String(req.params[paramName]);
     const ownId = String(req.user?._id || req.user?.id || '');
     if (requestedId === ownId || hasPermission(req.user, permission)) return next();
-    return res.status(403).json({ success: false, message: 'You cannot access another faculty member\'s record' });
+    return res.status(403).json({ success: false, message: "You cannot access another faculty member's record" });
   };
 }
 
-
-module.exports = { adminOrOA, oaAlso, authMiddleware, AdminMiddleware, adminOnly, requirePermission, requireAnyPermission, requireSelfOrPermission };
+module.exports = {
+  adminOrOA,
+  oaAlso,
+  authMiddleware,
+  AdminMiddleware,
+  adminOnly,
+  requirePermission,
+  requireAnyPermission,
+  requireSelfOrPermission,
+};
