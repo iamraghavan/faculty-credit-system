@@ -153,7 +153,7 @@ describe('export signatures', () => {
     expect(verifyExportToken(v.token).valid).toBe(true);
     const [p, s] = v.token.split('.');
     expect(verifyExportToken(`${p}x.${s}`).valid).toBe(false);
-    expect(verifyExportToken(`${p}.${s.slice(0, -2)}AA`).valid).toBe(false);
+    expect(verifyExportToken(`${p}.${s.slice(0, -2)}${s.endsWith('AA') ? 'BB' : 'AA'}`).valid).toBe(false);
     expect(verifyExportToken('garbage').reason).toBe('malformed_token');
   });
   test('content hash is key-order independent', () => {
@@ -178,6 +178,7 @@ describe('utilities', () => {
       whatsappOtp: '2',
       resetPasswordToken: 't',
       fcmToken: 'f',
+      fcmDevices: [{ token: 'device-token' }],
       mfaPendingSecret: 'pending',
     });
     expect(Object.keys(out)).toEqual(
@@ -189,6 +190,7 @@ describe('utilities', () => {
         'whatsappOtp',
         'resetPasswordToken',
         'fcmToken',
+        'fcmDevices',
       ]),
     );
   });

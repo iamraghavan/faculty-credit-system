@@ -187,6 +187,60 @@ describe('employment records', () => {
 });
 
 describe('notifications', () => {
+  test('registers independent web and mobile devices and removes only the requested token', async () => {
+    const webToken = 'web_token_12345678901234567890';
+    const mobileToken = 'mobile_token_12345678901234567890';
+    expect(
+      (
+        await api().put('/api/v1/notifications/device-token').set(auth(T.faculty)).send({
+          fcmToken: webToken,
+          platform: 'web',
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await api().put('/api/v1/notifications/device-token').set(auth(T.faculty)).send({
+          fcmToken: mobileToken,
+          platform: 'android',
+        })
+      ).body.deviceCount,
+    ).toBe(2);
+    let user = await db.get('users', ID.faculty1);
+    expect(user.fcmDevices.map((device) => device.token).sort()).toEqual([mobileToken, webToken].sort());
+    expect(
+      (
+        await api().delete('/api/v1/notifications/device-token').set(auth(T.faculty)).send({
+          fcmToken: webToken,
+        })
+      ).status,
+    ).toBe(200);
+    user = await db.get('users', ID.faculty1);
+    expect(user.fcmDevices.map((device) => device.token)).toEqual([mobileToken]);
+  });
+
+  test('rejects invalid notification tokens and platforms', async () => {
+    expect(
+      (
+        await api().put('/api/v1/notifications/device-token').set(auth(T.faculty)).send({
+          fcmToken: 'short',
+          platform: 'web',
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await api()
+          .put('/api/v1/notifications/device-token')
+          .set(auth(T.faculty))
+          .send({
+            fcmToken: 'a'.repeat(30),
+            platform: 'desktop',
+          })
+      ).status,
+    ).toBe(400);
+  });
+
   test('list own notifications', async () => {
     const res = await api().get('/api/v1/notifications').set(auth(T.faculty));
     expect(res.status).toBe(200);
@@ -417,13 +471,11 @@ describe('error handling and HTTP hardening', () => {
     const old = process.env.NODE_ENV;
     process.env.NODE_ENV = 'production';
     const Credit = require('../../../Models/Credit');
-    const spy = jest
-      .spyOn(Credit, 'find')
-      .mockRejectedValueOnce(
-        Object.assign(new Error('ResourceNotFoundException: table fcs_secret_x'), {
-          name: 'ResourceNotFoundException',
-        }),
-      );
+    const spy = jest.spyOn(Credit, 'find').mockRejectedValueOnce(
+      Object.assign(new Error('ResourceNotFoundException: table fcs_secret_x'), {
+        name: 'ResourceNotFoundException',
+      }),
+    );
     const res = await api().get(`/api/v1/credits/credits/faculty/${ID.faculty1}`).set(auth(T.faculty));
     process.env.NODE_ENV = old;
     spy.mockRestore();

@@ -9,6 +9,7 @@ const { sendFcmNotification } = require('../utils/firebase');
 const User = require('../Models/User');
 const Notification = require('../Models/Notification');
 const { isTrustedPushEndpoint } = require('../utils/pushEndpoint');
+const { changeDevice, tokensForUser } = require('../utils/notificationDevices');
 require('dotenv').config();
 
 // Configure web-push
@@ -81,7 +82,13 @@ async function sendPushToUser(userId, payload) {
     });
     channelStatus.inApp = 'delivered';
 
-    const subscriptions = await PushSubscription.findByUserId(userId);
+    let subscriptions = [];
+    try {
+      subscriptions = await PushSubscription.findByUserId(userId);
+    } catch (error) {
+      console.error('Legacy web push unavailable:', error.name || error.message);
+      channelStatus.webPush = 'unavailable';
+    }
     const notificationPayload = JSON.stringify(payload);
     const promises = (subscriptions || []).map(async (sub) => {
       try {
@@ -100,26 +107,40 @@ async function sendPushToUser(userId, payload) {
     await Promise.all(promises);
 
     // FCM is independent of Web Push subscriptions.
-    if (user && user.fcmToken) {
-      await sendFcmNotification(user.fcmToken, {
-        title: payload.title,
-        body: payload.body,
-        url: payload.url,
-        icon: payload.icon,
-        data: payload.data,
-      });
-      channelStatus.fcm = 'delivered';
+    const tokens = tokensForUser(user);
+    if (tokens.length) {
+      const results = await Promise.allSettled(
+        tokens.map((token) =>
+          sendFcmNotification(token, {
+            title: payload.title,
+            body: payload.body,
+            url: payload.url,
+            icon: payload.icon,
+            data: payload.data,
+          }),
+        ),
+      );
+      channelStatus.fcm = results.some(
+        (result) => result.status === 'fulfilled' && result.value && result.value !== 'INVALID_TOKEN',
+      )
+        ? 'delivered'
+        : 'unavailable';
     }
 
     // Transactional email is enabled by default; callers that already send a richer email can opt out.
     if (user?.email && payload.email !== false) {
-      await sendEmail({
-        to: user.email,
-        subject: payload.title,
-        text: `${payload.title}\n\n${payload.body}\n\nOpen CreditWise: ${payload.url || process.env.FRONTEND_URL || ''}`,
-        html: `<div style="font-family:Arial,sans-serif;max-width:640px;margin:auto"><h2 style="color:#17324d">${escapeHtml(payload.title)}</h2><p>${escapeHtml(payload.body)}</p><p><a href="${escapeHtml(payload.url || process.env.FRONTEND_URL || '#')}">Open CreditWise</a></p><hr><small>E.G.S. Pillay Group of Institutions</small></div>`,
-      });
-      channelStatus.email = 'delivered';
+      try {
+        await sendEmail({
+          to: user.email,
+          subject: payload.title,
+          text: `${payload.title}\n\n${payload.body}\n\nOpen CreditWise: ${payload.url || process.env.FRONTEND_URL || ''}`,
+          html: `<div style="font-family:Arial,sans-serif;max-width:640px;margin:auto"><h2 style="color:#17324d">${escapeHtml(payload.title)}</h2><p>${escapeHtml(payload.body)}</p><p><a href="${escapeHtml(payload.url || process.env.FRONTEND_URL || '#')}">Open CreditWise</a></p><hr><small>E.G.S. Pillay Group of Institutions</small></div>`,
+        });
+        channelStatus.email = 'delivered';
+      } catch (error) {
+        console.error('Notification email delivery failed:', error.name || error.message);
+        channelStatus.email = 'unavailable';
+      }
     }
     return { notificationId: inApp._id, channels: channelStatus };
   } catch (err) {
@@ -137,27 +158,37 @@ function escapeHtml(value) {
 
 /**
  * Update FCM device token for the current user
- * PUT /api/v1/users/device-token
+ * PUT /api/v1/notifications/device-token
  */
 async function updateDeviceToken(req, res, next) {
   try {
-    const { fcmToken } = req.body;
+    const { fcmToken, platform = 'web' } = req.body || {};
     const user = req.user;
 
     if (!fcmToken) {
       return res.status(400).json({ success: false, message: 'fcmToken is required' });
     }
 
-    await User.update(String(user._id), { fcmToken });
-
-    res.status(200).json({ success: true, message: 'Device token updated successfully' });
+    const result = await changeDevice(String(user._id || user.id), fcmToken, platform);
+    res.status(200).json({ success: true, message: 'Device registered for notifications', ...result });
   } catch (err) {
     next(err);
+  }
+}
+
+async function removeDeviceToken(req, res, next) {
+  try {
+    const { fcmToken } = req.body || {};
+    const result = await changeDevice(String(req.user._id || req.user.id), fcmToken, null);
+    res.json({ success: true, message: 'Device removed from notifications', ...result });
+  } catch (error) {
+    next(error);
   }
 }
 
 module.exports = {
   subscribe,
   updateDeviceToken,
+  removeDeviceToken,
   sendPushToUser,
 };

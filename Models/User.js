@@ -119,6 +119,23 @@ module.exports = {
     return { _id: id, ...data };
   },
 
+  async updateFcmDevices(id, previous, devices) {
+    const hasPrevious = Array.isArray(previous);
+    const result = await getDynamoClient().send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { _id: id },
+        UpdateExpression: 'SET #devices = :devices',
+        ConditionExpression:
+          'attribute_exists(#id) AND ' + (hasPrevious ? '#devices = :previous' : 'attribute_not_exists(#devices)'),
+        ExpressionAttributeNames: { '#devices': 'fcmDevices', '#id': '_id' },
+        ExpressionAttributeValues: { ':devices': devices, ...(hasPrevious ? { ':previous': previous } : {}) },
+        ReturnValues: 'ALL_NEW',
+      }),
+    );
+    return result.Attributes;
+  },
+
   // Placement and its history change together. A stale form cannot overwrite a transfer.
   async updateCompared(user, data) {
     const fields = Object.keys(data);

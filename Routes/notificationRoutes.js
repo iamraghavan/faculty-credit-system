@@ -1,7 +1,13 @@
 const express = require('express');
 const router = express.Router();
-const { subscribe, updateDeviceToken, sendPushToUser } = require('../Controllers/pushController');
-const { sendRemarkNotification, broadcastNotification, listNotifications, markNotificationRead, markAllNotificationsRead } = require('../Controllers/notificationController');
+const { subscribe, updateDeviceToken, removeDeviceToken, sendPushToUser } = require('../Controllers/pushController');
+const {
+  sendRemarkNotification,
+  broadcastNotification,
+  listNotifications,
+  markNotificationRead,
+  markAllNotificationsRead,
+} = require('../Controllers/notificationController');
 const { authMiddleware, requirePermission } = require('../Middleware/authMiddleware');
 
 // Subscribe to push notifications
@@ -9,6 +15,7 @@ router.post('/subscribe', authMiddleware, subscribe);
 
 // Update FCM Device Token
 router.put('/device-token', authMiddleware, updateDeviceToken);
+router.delete('/device-token', authMiddleware, removeDeviceToken);
 
 router.post('/test', authMiddleware, async (req, res, next) => {
   try {

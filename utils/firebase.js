@@ -2,77 +2,57 @@ const admin = require('firebase-admin');
 require('dotenv').config();
 
 let messaging = null;
-
 try {
-    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-        let serviceAccount;
-        try {
-            // Attempt to parse as JSON first
-            serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-        } catch (e) {
-            // If not JSON, assume it's a Base64 encoded string
-            const decoded = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT, 'base64').toString('utf8');
-            serviceAccount = JSON.parse(decoded);
-        }
-
-        admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount)
-        });
-        
-        messaging = admin.messaging();
-        console.log('✅ Firebase Admin initialized successfully.');
-    } else {
-        console.warn('⚠️ FIREBASE_SERVICE_ACCOUNT not found in environment variables. FCM will be disabled.');
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    let serviceAccount;
+    try {
+      serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    } catch {
+      serviceAccount = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT, 'base64').toString('utf8'));
     }
+    const app = admin.apps.length
+      ? admin.app()
+      : admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+    messaging = admin.messaging(app);
+  } else {
+    console.warn('FIREBASE_SERVICE_ACCOUNT is not configured. FCM delivery is disabled.');
+  }
 } catch (error) {
-    console.error('❌ Failed to initialize Firebase Admin:', error.message);
+  console.error('Firebase Admin initialization failed:', error.message);
 }
 
-/**
- * Send a notification to a specific FCM token
- * @param {string} token - The FCM registration token
- * @param {Object} payload - Notification data { title, body, data, icon }
- */
+function webLink(value) {
+  const origin = process.env.FRONTEND_URL;
+  if (!origin) return null;
+  try {
+    const base = new URL(origin);
+    if (base.protocol !== 'https:') return null;
+    const candidate = new URL(value || '/u/portal/dashboard/notifications', base);
+    if (candidate.origin !== base.origin || candidate.protocol !== 'https:') return null;
+    return candidate.href;
+  } catch {
+    return null;
+  }
+}
+
 async function sendFcmNotification(token, payload) {
-    if (!messaging) {
-        console.warn('FCM ignored: Firebase not initialized.');
-        return null;
-    }
-
-    if (!token) return null;
-
-    const message = {
-        token: token,
-        notification: {
-            title: payload.title,
-            body: payload.body,
-        },
-        data: payload.data || {},
-        android: {
-            notification: {
-                color: '#7e57c2',
-                channelId: 'high_importance_channel'
-            }
-        },
-        webpush: {
-            fcmOptions: {
-                link: payload.url || '/'
-            }
-        }
-    };
-
-    try {
-        const response = await messaging.send(message);
-        console.log('Successfully sent FCM message:', response);
-        return response;
-    } catch (error) {
-        console.error('Error sending FCM message:', error);
-        if (error.code === 'messaging/registration-token-not-registered') {
-             // Token is invalid, should be cleaned up in the database if possible
-             return 'INVALID_TOKEN';
-        }
-        throw error;
-    }
+  if (!messaging || !token) return null;
+  const link = webLink(payload.url);
+  const data = Object.fromEntries(Object.entries(payload.data || {}).map(([key, value]) => [key, String(value)]));
+  const message = {
+    token,
+    notification: { title: String(payload.title || 'CreditWise'), body: String(payload.body || '') },
+    data,
+    android: { notification: { color: '#7e57c2', channelId: 'high_importance_channel' } },
+    ...(link ? { webpush: { fcmOptions: { link } } } : {}),
+  };
+  try {
+    return await messaging.send(message);
+  } catch (error) {
+    if (error.code === 'messaging/registration-token-not-registered') return 'INVALID_TOKEN';
+    console.error('FCM delivery failed:', error.code || error.name || error.message);
+    throw error;
+  }
 }
 
 module.exports = { sendFcmNotification };

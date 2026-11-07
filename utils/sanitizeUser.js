@@ -15,6 +15,7 @@ const PRIVATE_FIELDS = new Set([
   'resetPasswordToken',
   'resetPasswordExpires',
   'fcmToken',
+  'fcmDevices',
   'passwordResetToken',
   'passwordResetExpires',
 ]);

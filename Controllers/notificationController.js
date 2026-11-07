@@ -11,6 +11,7 @@ const { recalcFacultyCredits } = require('../utils/calculateCredits');
 const { sendWhatsAppMessage } = require('../utils/whatsapp');
 const { sendRemarkNotificationHelper } = require('../utils/notificationHelper');
 const Notification = require('../Models/Notification');
+const { tokensForUser } = require('../utils/notificationDevices');
 require('dotenv').config();
 
 const TEMPLATE_DIR = path.join(__dirname, '..', 'email-templates');
@@ -92,7 +93,12 @@ async function broadcastNotification(req, res, next) {
       );
     }
 
-    const subscriptions = await PushSubscription.getAll();
+    let subscriptions = [];
+    try {
+      subscriptions = await PushSubscription.getAll();
+    } catch (error) {
+      console.error('Legacy web push unavailable during broadcast:', error.name || error.message);
+    }
     const pushPromises = subscriptions.map(async (sub) => {
       try {
         await webpush.sendNotification(sub, JSON.stringify(payload));
@@ -106,24 +112,25 @@ async function broadcastNotification(req, res, next) {
     // 2. Get all Users with FCM Tokens
     const { sendFcmNotification } = require('../utils/firebase');
     const users = await User.find(); // Find all users
-    const fcmPromises = users.filter((u) => u.fcmToken).map((u) => sendFcmNotification(u.fcmToken, payload));
+    const activeUsers = users.filter((user) => user.isActive !== false);
+    const fcmPromises = activeUsers.flatMap((user) =>
+      tokensForUser(user).map((token) => sendFcmNotification(token, payload)),
+    );
 
-    const inAppPromises = users
-      .filter((user) => user.isActive !== false)
-      .map((user) =>
-        Notification.create({
-          userId: user._id || user.id,
-          type: 'broadcast',
-          title,
-          message: body,
-          url: payload.url,
-          icon: payload.icon,
-          channels: { inApp: 'delivered' },
-        }),
-      );
+    const inAppPromises = activeUsers.map((user) =>
+      Notification.create({
+        userId: user._id || user.id,
+        type: 'broadcast',
+        title,
+        message: body,
+        url: payload.url,
+        icon: payload.icon,
+        channels: { inApp: 'delivered' },
+      }),
+    );
 
-    const emailPromises = users
-      .filter((user) => user.isActive !== false && user.email)
+    const emailPromises = activeUsers
+      .filter((user) => user.email)
       .map((user) =>
         sendEmail({
           to: user.email,
@@ -133,13 +140,17 @@ async function broadcastNotification(req, res, next) {
         }),
       );
 
-    // Run all in parallel
-    const deliveries = await Promise.allSettled([...pushPromises, ...fcmPromises, ...inAppPromises, ...emailPromises]);
+    // Inbox persistence is required; optional delivery channels may fail independently.
+    await Promise.all(inAppPromises);
+    const deliveries = await Promise.allSettled([...pushPromises, ...fcmPromises, ...emailPromises]);
 
     return res.json({
       success: true,
       message: 'Broadcast processed',
-      deliveries: { total: deliveries.length, failed: deliveries.filter((item) => item.status === 'rejected').length },
+      deliveries: {
+        total: deliveries.length + inAppPromises.length,
+        failed: deliveries.filter((item) => item.status === 'rejected').length,
+      },
     });
   } catch (err) {
     next(err);
